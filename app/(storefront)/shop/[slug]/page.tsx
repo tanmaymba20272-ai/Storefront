@@ -76,12 +76,17 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
             )}
 
             {/* Description */}
-            {product.description && (
-              <div
-                className="prose prose-sm max-w-none font-sans text-charcoal"
-                dangerouslySetInnerHTML={{ __html: product.description }}
-              />
-            )}
+              {product.description && (
+                <div
+                  className="prose prose-sm max-w-none font-sans text-charcoal"
+                  dangerouslySetInnerHTML={{ __html: product.description }}
+                />
+              )}
+              {/* Reviews feed */}
+              <div className="mt-8">
+                {/* @ts-expect-error Async server component */}
+                <ProductReviews productId={product.id} />
+              </div>
           </div>
         </div>
       </div>
@@ -94,6 +99,8 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
  * interactive components share the selected-variant state.
  */
 import VariantAndCart from '../../../../components/products/VariantAndCart'
+import ReviewsList from '../../../../components/reviews/ReviewsList'
+import { getServerSupabase } from '../../../../lib/supabaseClient'
 
 function VariantSelectorWrapper({
   variants,
@@ -113,4 +120,26 @@ function VariantSelectorWrapper({
       image={images[0] ?? null}
     />
   )
+}
+
+/**
+ * Server component that fetches product reviews and renders ReviewsList in a client island
+ */
+async function ProductReviews({ productId }: { productId: string }) {
+  const { supabase } = getServerSupabase()
+  try {
+    const { data, error } = await supabase.rpc('get_product_reviews', { product_uuid: productId, limit_rows: 20, offset_rows: 0 })
+    if (error) throw error
+    const reviews = (data ?? []) as any[]
+    return (
+      <Suspense fallback={<div className="mt-6 animate-pulse rounded bg-stone-100 p-6" /> }>
+        {/* ReviewsList is a client component */}
+        {/* @ts-expect-error server->client prop */}
+        <ReviewsList reviews={reviews} />
+      </Suspense>
+    )
+  } catch (err) {
+    console.error('reviews fetch error', err)
+    return <div className="mt-6 text-sm text-stone-500">Unable to load reviews</div>
+  }
 }

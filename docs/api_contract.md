@@ -398,6 +398,57 @@ Security & Performance Notes:
 
 - **Error Cases**:
   - 401 `AUTH_REQUIRED` — user must be authenticated (orders.user_id is NOT NULL in this sprint).
+
+  ## Reviews API Contract
+
+  ### Submit Review (Server Action)
+
+  - **Server Action**: `lib/actions/reviews.ts` exposes `submitReview({ product_id, rating, body, media_urls })`
+  - **Auth**: Server-side only — uses `getServerSupabase()` to validate the session.
+  - **Behavior**: Verifies the user purchased the product (status in `paid` or `delivered` and `items` JSONB contains the `product_id`). If eligible, inserts into `reviews` with `verified_purchase = true`.
+  - **Return**: `{ success: true, review_id }` or `{ success: false, error }`.
+
+  ### Verify Eligibility API
+
+  - **Endpoint**: `GET|POST /api/reviews/verify-eligibility?product_id=<uuid>`
+  - **Response**: `{ eligible: boolean }`
+  - **Auth**: 403 returned if not authenticated.
+  - **Server**: Uses `getServerSupabase()` and checks `orders` where `user_id = current_user.id` AND `status IN ('paid','delivered')` AND `items @> '[{"product_id":"<uuid>"}]'::jsonb` (JSONB containment).
+
+  ### get_product_reviews RPC
+
+  - **RPC**: `public.get_product_reviews(product_uuid uuid, limit int DEFAULT 20, offset int DEFAULT 0)`
+  - **Behavior**: Returns a safe subset of `reviews` fields ordered by weighted tiers:
+    - Tier 1: `rating = 5` AND `array_length(media_urls,1) > 0`
+    - Tier 2: `rating = 4` AND `array_length(media_urls,1) > 0`
+    - Tier 3: `rating = 5` AND no media URLs
+    - Tier 4: everything else
+    Within each tier sort by `helpful_count DESC`, then `created_at DESC`.
+  - **Security**: Implemented `SECURITY DEFINER` function — grant `EXECUTE` only to appropriate roles.
+  - **Example response row**:
+
+  ```json
+  {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "product_id": "22222222-2222-2222-2222-222222222222",
+    "user_id": "33333333-3333-3333-3333-333333333333",
+    "rating": 5,
+    "body": "Love the fabric and fit!",
+    "media_urls": ["https://.../review-media/33333333/photo1.jpg"],
+    "helpful_count": 12,
+    "verified_purchase": true,
+    "created_at": "2026-03-01T12:34:56.789Z"
+  }
+  ```
+
+  ### Storage & Upload Guidelines
+
+  - **Bucket**: `review-media` — path convention: `review-media/<user_id>/<filename>`.
+  - **Client limits**: Recommend max 20MB per file, max ~100MB total per review (enforce client-side orchestration and show progress).
+  - **Policies**: Use `storage.objects` RLS policies to restrict `INSERT` to authenticated users where `new.key LIKE auth.uid() || '/%'`. Reads can be public for this bucket or served via signed URLs for private buckets.
+
+  ---
+
   - 409 `INVENTORY_EXHAUSTED` — returned when requested qty exceeds available stock.
   - 502 `RAZORPAY_ORDER_FAILED` — Razorpay order creation failed; reserved inventory is released.
 

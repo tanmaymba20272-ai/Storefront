@@ -2,7 +2,7 @@
 *This file acts as the persistent brain for the agentic team. It MUST be read before any code is written and updated whenever a major architectural decision is made or a sprint is completed.*
 
 ## 1. Active Context
-- **Current Phase:** Sprint 7 complete ✅ — Sprint 8 planning (27 Feb 2026).
+- **Current Phase:** Sprint 8 complete ✅ — Sprint 9 planning (27 Feb 2026).
 - **Project Goal:** Building a highly responsive, modern e-commerce web app for a sustainable fashion brand with full Shopify parity.
 - **Key Mechanics:** The brand relies on a limited-drop model (requiring strict inventory control) and operates out of India (requiring local payment and shipping logistics).
 
@@ -38,6 +38,10 @@
 - **DECISION 29 (Admin Orders View):** `/admin/orders` is a Server Component that fetches the latest 50 orders (ordered by `created_at DESC`) using `getServerSupabase()` and passes them to `<OrdersTable />` — a `"use client"` island. `OrdersTable` renders a sortable table with columns: Order ID, Customer, Amount, Status, Created. `<OrdersTableSkeleton />` is the Suspense fallback. The `orders` list must never be fetched client-side with the anon key; always use the service-role client server-side.
 - **DECISION 30 (Shiprocket Token Management — Per-Request Model):** `lib/utils/getShiprocketToken.ts` is a server-only utility that fetches the Shiprocket `email` and `password` from `store_settings` (encrypted, per DECISION 3 + DECISION 11), then POSTs to `https://apiv2.shiprocket.in/v1/external/auth/login` to obtain a Bearer token. The token is returned directly to the caller — there is NO module-level mutable variable caching it between requests. This per-request model is the safe default in a serverless environment where module state can persist unpredictably across invocations. A Redis/in-memory cache with expiry TTL matching Shiprocket's token lifetime is the approved upgrade path for Sprint 8+, but must not introduce stale tokens.
 - **DECISION 31 (Shiprocket Fulfillment Route — Admin-Only, Error Mapping, Idempotency):** `POST /api/admin/orders/[id]/fulfill` enforces admin access by calling `supabase.auth.getUser()` (NOT `getSession()` — `getUser()` re-validates with the Supabase auth server on every call) and then checking `profiles.role === 'admin'`; returns 403 for any non-admin. Shiprocket API errors are mapped to meaningful HTTP statuses: pincode / serviceability errors → 400 `SERVICE_UNAVAILABLE`; all other Shiprocket failures → 502 `SHIPROCKET_ERROR`. Idempotency is enforced: if `fulfillment_status` is already set to a non-`unfulfilled` value, the route returns the existing fulfillment data (200) without re-calling Shiprocket. The route persists `shiprocket_order_id`, `shipment_id`, `awb_code`, `courier_name`, `label_url`, and `fulfillment_status` to the `orders` table as each step completes.
+- **DECISION 32 (Verified Purchase Gating):** Review submission is gated by a server-side purchase eligibility check in `app/api/reviews/verify-eligibility/route.ts` and enforced again inside `lib/actions/reviews.ts`. The check queries `orders` where `user_id = auth.uid()` AND `status IN ('paid', 'delivered')` AND `items @> '[{"product_id": "<uuid>"}]'` (JSONB containment — NOT a string search). `verified_purchase` on the inserted review row is always set server-side from the DB result; it must never be accepted from client input. The `getUser()` pattern (not `getSession()`) is mandatory here as this is a write-gating check.
+- **DECISION 33 (UGC Sorting Algorithm — Tiered Weight):** Product reviews are retrieved via `public.get_product_reviews(product_uuid uuid, limit_rows int, offset_rows int)` SECURITY DEFINER RPC. The sort weight is: Tier 1 = rating 5 + has media, Tier 2 = rating 4 + has media, Tier 3 = rating 5 text-only, Tier 4 = everything else. Within each tier: `helpful_count DESC`, then `created_at DESC`. The `CASE` expression must guard against NULL `media_urls` using `COALESCE(array_length(media_urls,1), 0) > 0` — not bare `array_length`. The RPC is called without the `public.` schema prefix in Supabase client `.rpc()` calls.
+- **DECISION 34 (Review Media Bucket — Public Reads, Auth Writes):** The `review-media` Supabase Storage bucket is public-read (no signed URL required for display). Uploads are restricted to authenticated users writing under their own `<user_id>/` path prefix via `storage.objects` RLS policy. The client constructs display URLs as `${NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/review-media/<key>` — raw storage keys must never be used directly as `<img src>` values without this transformation. If the bucket is ever switched to private, server-side signed URL generation must be added and a TODO comment is present in `ReviewCard.tsx`. Client-side upload size limits: 5 MB for images, 20 MB for videos — enforced before upload starts with a user-visible error; Supabase Storage policy enforces the hard cap at 20 MB.
+- **DECISION 35 (Review Modal — Auth + Upload Contract):** `ReviewModal.tsx` is a `"use client"` Framer Motion island. Before uploading, it calls `supabase.auth.getUser()` to obtain the live `user_id` for the storage path (`review-media/<user_id>/<filename>`). Submission calls `lib/actions/reviews.submitReview(...)` as a server action. The modal implements: `role="dialog"`, `aria-modal="true"`, `aria-labelledby`, focus trap (Tab/Shift+Tab cycling), ESC-to-close, and `role="button"` / `aria-label` on the file drop zone. Star buttons carry `aria-label="Rate N out of 5 stars"`.
 
 ## 3. Known Constraints & Workarounds
 - **Supabase env vars required at runtime:** `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (client); `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server/middleware). The client intentionally does not throw on missing vars during build but will warn at runtime.
@@ -413,3 +417,47 @@ npm run typecheck   # should return 0 errors
 3. Assign admin role to the fulfillment operator account before testing the fulfill route.
 
 **Open items for Sprint 8:** Inventory TTL expiry background job, Shiprocket webhook for delivery status updates, storefront order tracking page, Cypress/Playwright e2e tests, Shadcn full init, storage bucket creation, profiles trigger `supabase db push`.
+
+---
+
+### Sprint 8 — Verified Reviews & UGC Algorithm ✅ (27 Feb 2026)
+
+**Backend:**
+- `db/migrations/20260301_0012_reviews_ugc.sql` — ALTERs existing `reviews` table to add `media_urls text[]` (default `{}`), `verified_purchase boolean` (default `false`), `helpful_count int` (default `0`). Adds composite indexes on `(product_id, created_at)` and `(product_id, rating, helpful_count)` for feed queries. RLS policy guidance: authenticated users INSERT/UPDATE own rows; anon can read.
+- `db/migrations/20260301_0013_review_media_bucket.sql` — Documents `review-media` bucket creation (CLI: `supabase storage create-bucket review-media --public`) and `storage.objects` RLS policy snippets restricting uploads to `auth.uid() || '/%'` path prefix.
+- `db/migrations/20260301_0014_get_product_reviews_rpc.sql` — `public.get_product_reviews(product_uuid uuid, limit_rows int DEFAULT 20, offset_rows int DEFAULT 0)` SECURITY DEFINER RPC. Tiered sort: Tier 1 (5★ + media) → Tier 2 (4★ + media) → Tier 3 (5★ text-only) → Tier 4 (everything else); within tier: `helpful_count DESC`, `created_at DESC`. NULL-safe via `COALESCE(array_length(media_urls,1), 0)`.
+- `app/api/reviews/verify-eligibility/route.ts` — GET/POST handler; `getUser()` auth; JSONB containment check on `orders.items`; returns `{ eligible: boolean }` or 403.
+- `lib/actions/reviews.ts` — `submitReview({ product_id, rating, body, media_urls })` server action; enforces purchase eligibility server-side; sets `verified_purchase` from DB result; inserts review row.
+- `docs/api_contract.md` — appended reviews endpoints, RPC spec, upload path convention.
+- `db/tests/reviews/eligibility_check.md`, `algorithm_seed.md` — manual psql/curl test guides.
+
+**Frontend:**
+- `components/reviews/ReviewModal.tsx` — Framer Motion modal; `react-hook-form` + Zod; 1–5 star selector (keyboard-accessible, `aria-label`); `textarea`; drag-and-drop uploader with per-file progress, size enforcement (5 MB image / 20 MB video) before upload; calls `supabase.auth.getUser()` for upload path; calls `submitReview` server action on submit; full focus trap + ESC + `role="dialog"` + `aria-modal` + `aria-labelledby`.
+- `components/reviews/ReviewCard.tsx` — displays reviewer name, star rating, body, `helpful_count`, media thumbnails. Constructs public URLs via `${NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/review-media/<key>` (no raw keys as `src`).
+- `components/reviews/ReviewsList.tsx` — client island; receives pre-fetched reviews as prop; renders grid of `ReviewCard`.
+- `components/reviews/Lightbox.tsx` — fullscreen image/video viewer; Framer Motion open/close; next/prev controls; swipe gestures; video rendered with `controls`, `playsInline`, `preload="metadata"`; video detection by file extension whitelist (not URL substring).
+- `app/(storefront)/shop/[slug]/page.tsx` — updated to include `ProductReviews` Server Component fetching via `get_product_reviews` RPC in a `<Suspense>` boundary.
+
+**QA fixes (Sprint 8 QA sweep — 12 fixes across 5 files):**
+
+| File | Fix |
+|------|-----|
+| `lib/actions/reviews.ts` | 🔴 CRITICAL: JSONB containment sent `undefined` (`{ product_id }` shorthand with wrong variable name) → fixed to `[{ product_id: productId }]` |
+| `ReviewModal.tsx` | `TODO_USER_ID` placeholder → calls `supabase.auth.getUser()` before upload |
+| `ReviewModal.tsx` | Star `aria-label` was `"${n} star"` → `"Rate ${n} out of 5 stars"` |
+| `ReviewModal.tsx` | File drop zone missing `role="button"`, `tabIndex`, `onKeyDown`, hidden `<input>` — added full keyboard/AT support |
+| `ReviewModal.tsx` | Missing `role="dialog"`, `aria-modal`, `aria-labelledby`, focus trap, ESC close — all added |
+| `ReviewCard.tsx` | Raw storage keys used as `<img src>` → `toPublicUrl()` helper added |
+| `Lightbox.tsx` | Video missing `playsInline` + `preload="metadata"` → added |
+| `Lightbox.tsx` | Video detection via `src.includes('video')` (fragile) → replaced with extension whitelist |
+| `shop/[slug]/page.tsx` | `getServerSupabase()` incorrect destructuring; wrong RPC param names; `public.` prefix removed from `.rpc()` call |
+
+**Open issue for Sprint 9:** `app/account/orders/page.tsx` was not created by the Frontend Specialist — the "Leave a Review" entry point from order history is missing and must be built.
+
+**Critical manual steps before Sprint 9:**
+1. Apply migrations in order: `0012`, `0013` (bucket creation), `0014`.
+2. Create `review-media` storage bucket: `supabase storage create-bucket review-media --public`.
+3. Apply `storage.objects` RLS snippets from `0013` migration via Supabase SQL editor.
+4. Grant RPC execute: `GRANT EXECUTE ON FUNCTION public.get_product_reviews(uuid,int,int) TO authenticated, anon;`
+
+**Open items for Sprint 9:** Account orders page with Leave a Review button, inventory TTL expiry job, Shiprocket delivery webhook, storefront order tracking page, Cypress/Playwright e2e, Shadcn full init.
