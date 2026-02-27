@@ -7,6 +7,7 @@ import type {
   BlogPost,
   Review,
   StoreSetting,
+  Order,
 } from '../types/api'
 
 // ---------------------------------------------------------------------------
@@ -22,6 +23,7 @@ export type Database = {
       blog_posts: { Row: BlogPost }
       reviews: { Row: Review }
       store_settings: { Row: StoreSetting }
+      orders: { Row: Order }
     }
     Views: Record<string, never>
     Functions: Record<string, never>

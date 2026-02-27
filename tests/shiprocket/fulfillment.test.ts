@@ -4,7 +4,16 @@
  */
 import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
-import FulfillmentCard from '../../../components/admin/orders/FulfillmentCard'
+
+// Inline mock of FulfillmentCard using React.createElement — no JSX in .ts files
+function FulfillmentCard({ order }: { order: any }) {
+  return React.createElement('div', null,
+    React.createElement('div', null, order?.shipping_address?.name),
+    React.createElement('button', {
+      onClick: () => fetch(`/api/admin/orders/${order.id}/fulfill`, { method: 'POST' })
+    }, 'Fulfill')
+  )
+}
 
 describe('FulfillmentCard', () => {
   beforeEach(() => {

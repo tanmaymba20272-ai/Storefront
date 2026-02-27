@@ -140,6 +140,63 @@ Notes:
   - RLS expectations: `store_settings` is admin-only (read/write). Server-side operations should use the service role.
 */
 
+## Chat API
+
+### POST /api/chat
+
+- **Purpose**: Real-time chat endpoint for shopping/support/general assistant functionality. Streams tokenized responses back to the client.
+- **Runtime**: Edge (server-only). Rate-limited to 10 messages per minute per IP or per authenticated user (dev-only in-memory limiter; use Redis/Supabase KV in production).
+
+- **Request JSON**:
+
+```json
+{
+  "message": "string",
+  "mode": "shopping" | "support" | "general",
+  "order_id": "optional-string",
+  "email": "optional-email-for-unauthenticated-support"
+}
+```
+
+- **Auth rules**:
+  - `shopping` and `general` modes are public (no auth required).
+  - `support` mode requires an authenticated session. If unauthenticated, the client may provide `order_id` + `email` to lookup the order. Otherwise the endpoint returns `401` with a friendly message asking the user to sign in or provide order details.
+
+- **Rate limiting**: 10 requests per minute per IP or per `auth.uid()` if authenticated. The current implementation is an in-memory sliding-window map (dev-only).
+
+- **Context injection**:
+  - `shopping`: the server queries up to 6 active products with inventory > 0 and injects a compact JSON summary (fields: `id, name, slug, price_cents, currency, images, description(<=120 chars), inventory_count`). Admin-only fields (e.g. `cost_price`, `internal_notes`) are never included.
+  - `support`: the server queries the authenticated user's most recent order (or looks up by `order_id+email` when unauthenticated) and injects `{ id, shiprocket_order_id, fulfillment_status, created_at }`.
+  - Injected context is sanitized and size-limited to avoid token overflows.
+
+- **System prompt guarantees**:
+  - The assistant must only recommend items present in the injected `products` context for shopping mode.
+  - Never reveal `cost_price`, `internal_notes`, or admin-only secrets.
+  - For support, only reference `fulfillment_status` and `shiprocket_order_id`. Do not fabricate AWB/shipment details.
+  - Refuse to answer requests that would expose other users' data.
+
+- **Streaming response**:
+  - The route returns a streaming response (`text/event-stream` style). The server relays the provider's streaming tokens incrementally to the client.
+  - Example client-side consumption (pseudo):
+
+```js
+const r = await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ message, mode }) })
+const reader = r.body.getReader()
+// read chunks and append to UI as they arrive
+```
+
+- **Errors**:
+  - `400` — invalid request payload
+  - `401` — support mode requires authentication or order_id+email
+  - `429` — rate limit exceeded (Retry-After header returned)
+  - `502` — upstream LLM provider failed or did not return a stream
+
+### Notes
+
+- The server resolves the LLM API key from `store_settings` key `LLM_API_KEY` (encrypted). The server helper `lib/utils/getLlmKey.ts` decrypts the value with `decryptSettings()` and returns `{ provider, apiKey }`. The decrypted value may be a plain API key string or JSON with `{ provider, apiKey }`.
+- The current implementation supports OpenAI-style streaming. For other providers, extend the route to handle provider-specific streaming formats.
+
+
 ## Webhooks
 
 This application accepts Razorpay webhooks at `/api/webhooks/razorpay` and follows an idempotent processing contract.

@@ -2,7 +2,7 @@
 *This file acts as the persistent brain for the agentic team. It MUST be read before any code is written and updated whenever a major architectural decision is made or a sprint is completed.*
 
 ## 1. Active Context
-- **Current Phase:** Sprint 9 complete ✅ — Sprint 10 planning (27 Feb 2026).
+- **Current Phase:** Sprint 10 complete ✅ — Sprint 11 planning (27 Feb 2026).
 - **Project Goal:** Building a highly responsive, modern e-commerce web app for a sustainable fashion brand with full Shopify parity.
 - **Key Mechanics:** The brand relies on a limited-drop model (requiring strict inventory control) and operates out of India (requiring local payment and shipping logistics).
 
@@ -45,6 +45,8 @@
 - **DECISION 36 (Blog HTML Sanitization — isomorphic-dompurify):** All CMS-generated blog article HTML is sanitized via `isomorphic-dompurify` (`DOMPurify.sanitize(html)`) server-side inside `app/blog/[slug]/page.tsx` before being passed to `dangerouslySetInnerHTML`. This is mandatory — raw database HTML strings must never reach the browser unsanitized. `isomorphic-dompurify` is used (not browser-only `dompurify`) to allow sanitization to run inside a Next.js Server Component. The `blog-media` Supabase Storage bucket (DECISION 14) holds article images uploaded via the Admin CMS.
 - **DECISION 37 (Dynamic Sitemap Strategy):** The sitemap is implemented as `app/sitemap.ts` exporting a default `async function sitemap(): Promise<MetadataRoute.Sitemap>`. It queries Supabase for all published `blog_posts` and active `products`, constructing absolute URLs from the `NEXT_PUBLIC_SITE_URL` env var. Next.js App Router auto-discovers this file and serves it at `/sitemap.xml` — no additional route config is needed. `lastModified` is sourced from each row's `updated_at` timestamp.
 - **DECISION 38 (Email API Key Per-Request Pattern):** `lib/utils/getEmailKey.ts` is a server-only utility that fetches and decrypts `EMAIL_API_KEY` from `store_settings` on every invocation — no module-level caching (mirrors DECISION 30 for Shiprocket). The admin broadcast route `POST /api/admin/email/broadcast` enforces admin access via `getUser()` + `profiles.role === 'admin'` (mirrors DECISION 31). A `"test": true` flag in the request body sends only to the authenticated admin's address, protecting real subscribers during test runs. The `marketing_opt_in boolean DEFAULT true` column on `profiles` (migration `20260301_0015`) is the opt-in filter — only users with `marketing_opt_in = true` are included in live broadcast queries.
+- **DECISION 39 (LLM Context Injection — Minimal RAG Pattern):** `app/api/chat/route.ts` is an Edge runtime route that performs intent-based context injection before calling the LLM. Shopping intent: queries `products` where `status='active'` AND `inventory_count > 0`, limit 6, selecting only `id, name, slug, price_cents, currency, description` — `cost_price`, `internal_notes`, and draft products are never selected or injected. Support intent: calls `supabase.auth.getUser(token)` (DECISION 31 pattern) to obtain a verified `user_id`, then queries `orders` filtered by `.eq('user_id', validatedUid)`, limit 1, injecting only `id`, `shiprocket_order_id`, and `fulfillment_status`. The system prompt includes 7 explicit hard rules forbidding: DB credentials, `cost_price`/`internal_notes`, other-user data, hallucinated products, fabricated AWB codes, and breaking character. Descriptions are trimmed to 120 chars to avoid token overflow. The JWT sub-claim is decoded (unverified) only for the rate-limit bucket key — all data-access decisions use the server-verified `getUser()` result exclusively.
+- **DECISION 40 (Chat Rate Limiting — In-Memory Sliding Window, Dev-Only):** `app/api/chat/route.ts` implements a sliding-window rate limiter (10 requests per 60-second window per IP or authenticated UID) using a module-level `Map<string, number[]>`. The rate check runs before any DB or LLM calls. The `429` response includes a `Retry-After` header. **This is not production-safe** — module-level `Map` state is not shared across Edge runtime instances or serverless cold starts. The approved upgrade path is Redis `INCR`+`EXPIRE` or Supabase KV with a TTL. The in-memory approach is acceptable for development and single-instance deployments only.
 
 ## 3. Known Constraints & Workarounds
 - **Supabase env vars required at runtime:** `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (client); `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server/middleware). The client intentionally does not throw on missing vars during build but will warn at runtime.
@@ -514,3 +516,57 @@ npm run typecheck   # should return 0 errors
 4. `npm install && npm test` — confirm all 10 suites pass.
 
 **Open items for Sprint 10:** `app/account/orders/page.tsx` with Leave a Review entry point (missing since Sprint 8), inventory TTL expiry background job, Shiprocket delivery webhook + storefront order tracking page, Cypress/Playwright e2e tests, Shadcn full init.
+
+---
+
+### Sprint 10 — Shopping Assistant & Support Bot (AI Chat) ✅ (Feb 2026)
+
+**Backend:**
+- `lib/utils/getLlmKey.ts` — Per-request encrypted LLM key fetcher (mirrors DECISION 30). Reads `LLM_API_KEY` from `store_settings`, decrypts with `decryptSettings()`, returns `{ provider, apiKey }`. No module-level cache.
+- `app/api/chat/route.ts` — Edge runtime streaming chat endpoint. In-memory sliding-window rate limiter (10 req/60s per IP/UID), intent routing (shopping/support/general), per-intent Supabase context injection, 7-rule system prompt, OpenAI-compatible `text/event-stream` response.
+- `docs/api_contract.md` — Appended: `POST /api/chat` spec (request body, intent values, streaming format, RLS note).
+- `db/tests/chat/rate_limit.md` — Manual test checklist for rate-limit and intent-routing verification.
+
+**New shared types:**
+- `types/chat.ts` — Shared `ChatMessage = { id: string; role: 'user'|'bot'; text: string }` type used by all chat components and test files.
+- `types/api.ts` — Extended: `Order` interface (no `cost_price`), `orders` table in `Database`, `slug` and `status` optional fields added to `Product`.
+- `lib/supabaseClient.ts` — Extended: `orders: { Row: Order }` added to embedded `Database` type.
+
+**Frontend:**
+- `components/chat/ChatWidget.tsx` — Floating button + Framer Motion slide-up panel; `LoginModal` integration; `AbortController` stream cancellation on close; `aria-expanded`, `aria-labelledby` for accessibility.
+- `components/chat/ChatMessages.tsx` — Message list with streaming token accumulation, `aria-live="polite"`, auto-scroll.
+- `components/chat/ChatInput.tsx` — Form with `onRequestLogin` callback (must be destructured from props — silent bug if omitted), auth-awareness via `supabase.auth.getUser()`, `try/finally` for submit state.
+- `components/chat/SuggestionChips.tsx` — Preset prompt chips ("What are your materials?", "Track my order", "Return policy").
+- `components/chat/README.md` — Usage and prop documentation.
+- `app/layout.tsx` — `<ChatWidget supabase={supabase} />` mounted at root layout level.
+
+**QA fixes (19 total across 7 files):**
+
+| # | File | Fix |
+|---|------|-----|
+| 1 | `types/chat.ts` | Created shared `ChatMessage` type |
+| 2 | `types/api.ts` | Added `Order`, `orders`, `slug`, `status` |
+| 3 | `app/api/chat/route.ts` | Strengthened system prompt (7 hard rules) |
+| 4 | `app/api/chat/route.ts` | `getUser()` for all data-access decisions |
+| 5 | `app/api/chat/route.ts` | All `any` removed; typed catch blocks |
+| 6 | `components/chat/ChatWidget.tsx` | `aria-expanded`, `aria-labelledby` |
+| 7 | `components/chat/ChatWidget.tsx` | Uses shared `ChatMessage` type |
+| 8 | `components/chat/ChatInput.tsx` | Fixed `onRequestLogin` never-destructured bug |
+| 9 | `components/chat/ChatInput.tsx` | `SupabaseClient<Database>` (not `any`) |
+| 10 | `components/chat/ChatInput.tsx` | `try/finally` for `setSubmitting` |
+| 11 | `components/chat/ChatMessages.tsx` | Uses shared `ChatMessage` type |
+| 12 | `tests/chat/chatWidget.test.tsx` | Function matcher for split-node streaming text |
+| 13 | `jest.setup.ts` | `TextEncoder`/`TextDecoder` polyfill from `util` |
+| 14 | `jest.setup.ts` | `ReadableStream` polyfill from `stream/web` |
+| 15 | `tests/shiprocket/fulfillment.test.ts` | All JSX → `React.createElement()` (`.ts` cannot contain JSX) |
+| 16 | `lib/supabaseClient.ts` | `orders` table added to `Database` type |
+| 17 | `app/(storefront)/shop/[slug]/page.tsx` | `getServerSupabase()` not destructured |
+| 18 | `app/(storefront)/shop/[slug]/page.tsx` | Removed unused `@ts-expect-error` directives |
+| 19 | `tests/auth.test.tsx` | `toBeTruthy()` instead of `toBeInTheDocument()` for jest-dom type safety |
+
+**Critical manual steps before Sprint 11:**
+1. Store LLM API key encrypted in `store_settings` under key `LLM_API_KEY` (format: `openai:<your-key>` or `anthropic:<your-key>`).
+2. `npm test` — confirm all 11 suites pass.
+3. **Replace in-memory rate limiter** in `app/api/chat/route.ts` with Redis `INCR`+`EXPIRE` or Supabase KV before production deployment (DECISION 40).
+
+**Open items for Sprint 11:** `app/account/orders/page.tsx` Leave a Review entry point, inventory TTL expiry background job, Shiprocket delivery webhook + storefront order tracking page, Cypress/Playwright e2e tests, personalized product recommendations via embeddings, chat history persistence in Supabase.

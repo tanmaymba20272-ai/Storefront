@@ -2,6 +2,7 @@ import './globals.css'
 import type { ReactNode } from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
+import ChatWidget from '../components/chat/ChatWidget'
 
 export const metadata = {
   title: 'Storefront',
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Navbar />
         <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-8">{children}</main>
         <Footer />
+        <ChatWidget />
       </body>
     </html>
   )

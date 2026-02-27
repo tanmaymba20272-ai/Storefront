@@ -30,10 +30,14 @@ export interface Drop {
   created_at: Timestamptz
 }
 
+export type ProductStatus = 'active' | 'inactive' | 'archived'
+
 export interface Product {
   id: UUID
   sku?: string | null
   name: string
+  slug?: string | null
+  status?: ProductStatus | null
   description?: string | null
   price_cents: number
   currency: string
@@ -41,6 +45,16 @@ export interface Product {
   category_id?: UUID | null
   drop_id?: UUID | null
   metadata: Record<string, unknown>
+  created_at: Timestamptz
+}
+
+/** Order row — intentionally omits cost_price and internal_notes (admin-only fields). */
+export interface Order {
+  id: UUID
+  user_id: UUID
+  email?: string | null
+  shiprocket_order_id?: string | null
+  fulfillment_status: string
   created_at: Timestamptz
 }
 
@@ -119,6 +133,11 @@ export interface Database {
         Row: StoreSetting
         Insert: Omit<StoreSetting, 'id' | 'created_at'> & { id?: number; created_at?: Timestamptz }
         Update: Partial<StoreSetting>
+      }
+      orders: {
+        Row: Order
+        Insert: Omit<Order, 'id' | 'created_at'> & { id?: UUID; created_at?: Timestamptz }
+        Update: Partial<Order>
       }
     }
     Views: Record<string, never>
