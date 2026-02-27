@@ -15,7 +15,7 @@ const payload = {
     order: {
       entity: {
         id: 'order_test_123',
-        --: 'replace with realistic structure'
+        // -- replace with realistic structure
       }
     }
   }

@@ -261,6 +261,57 @@ export interface ApiContract {
  *    - When a new row is inserted into `auth.users`, the DB trigger
  *      `public.create_profile_after_auth_user()` will ensure a matching
 
+## Admin Fulfillment API
+
+### POST /api/admin/orders/:id/fulfill
+
+- **Purpose**: Create a Shiprocket manifest for an order, assign an AWB, and fetch the shipping label. This endpoint is admin-only and idempotent.
+- **Auth**: Admin server session required (server-side `profiles.role === 'admin'`).
+- **Path params**: `:id` — `orders.id` (UUID)
+
+Request: POST with admin session (no body required)
+
+Success (200):
+
+```json
+{
+  "shiprocket_order_id": "SR12345",
+  "shipment_id": "SHIP123",
+  "awb_code": "AWB0001",
+  "courier_name": "FastCourier",
+  "label_url": "https://.../label.pdf"
+}
+```
+
+Idempotency: If `orders.fulfillment_status !== 'unfulfilled'` the endpoint returns existing fulfillment fields and does not re-submit.
+
+Error cases:
+- 400 `SERVICE_UNAVAILABLE` — Shiprocket reports pincode/serviceability problems. Response: `{ error: 'SERVICE_UNAVAILABLE', details }`.
+- 403 `FORBIDDEN` — caller is not an admin.
+- 502 `SHIPROCKET_ERROR` — other third-party errors.
+
+Server-side behavior summary:
+- Validates admin session via `getServerSupabase()` and `profiles.role`.
+- Reads `orders` row server-side and maps `items` and `shipping_address` into a simplified Shiprocket adhoc payload. Internal-only order fields are omitted.
+- On Shiprocket success saves `shiprocket_order_id`, `shipment_id` and sets `fulfillment_status = 'manifested'`.
+- Calls the AWB assign endpoint and saves `awb_code` and `courier_name`.
+- Fetches the label; if Shiprocket returns a base64 label the server should persist it to object storage and save the storage URL in `orders.label_url` (current implementation stores a placeholder if base64 is returned).
+
+## Orders table changes (fulfillment)
+
+New columns added to `public.orders` for fulfillment integration:
+
+- `shiprocket_order_id text`
+- `shipment_id text`
+- `awb_code text`
+- `courier_name text`
+- `label_url text` (URL to stored PDF or placeholder if base64)
+- `fulfillment_status text` (default `'unfulfilled'`) — values: `'unfulfilled' | 'manifested' | 'in_transit' | 'delivered'` (example values)
+
+Security notes:
+- RLS should prevent non-admin writes to these columns. Admin-only backend processes and the DB service-role should be the only principals updating fulfillment fields.
+
+
 ## Success page note
 
 - The storefront success page (`/checkout/success?order_id=<order_id>`) performs a server-side lookup against the `orders` table (via the server factory `getServerSupabase()`) to read order details by `id` (the implementation consumes `GET /orders?id=<order_id>` semantics server-side). The client-side cart is cleared only after the customer lands on this page — the clearing is performed by a client component that runs on mount.

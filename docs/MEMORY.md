@@ -2,7 +2,7 @@
 *This file acts as the persistent brain for the agentic team. It MUST be read before any code is written and updated whenever a major architectural decision is made or a sprint is completed.*
 
 ## 1. Active Context
-- **Current Phase:** Sprint 6 planning (Sprint 5 complete ✅ — 27 Feb 2026).
+- **Current Phase:** Sprint 7 complete ✅ — Sprint 8 planning (27 Feb 2026).
 - **Project Goal:** Building a highly responsive, modern e-commerce web app for a sustainable fashion brand with full Shopify parity.
 - **Key Mechanics:** The brand relies on a limited-drop model (requiring strict inventory control) and operates out of India (requiring local payment and shipping logistics).
 
@@ -33,6 +33,11 @@
 - **DECISION 24 (Stateful Inventory Reservation Pattern):** Sprint 5 introduces `public.reserve_inventory(cart_items jsonb, order_id uuid) RETURNS jsonb` — a stateful RPC that **increments `reserved_count`** on each product row (using `SELECT … FOR UPDATE`) and inserts rows into `public.inventory_reservations`. It returns `{ success: true }` or `{ success: false, error: 'INVENTORY_EXHAUSTED', sku }`. Critically: it does NOT decrement `inventory` — that happens only on webhook confirmation (Sprint 6). A paired `public.release_reservation(order_id uuid)` RPC reverses the `reserved_count` increment and deletes reservation rows; it **must** be called if any downstream step (e.g., Razorpay order creation) fails. Both RPCs are `SECURITY DEFINER` and must be owned by the service-role DB user. Direct client writes to `reserved_count` are blocked by RLS.
 - **DECISION 25 (Razorpay Key Storage & Server-Only Access):** Razorpay credentials (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`) are stored encrypted in `store_settings` (DECISION 3 + DECISION 11). They are retrieved exclusively via `lib/utils/getRazorpayKeys.ts` which calls `getServerSupabase()` and `decryptSettings()`. This utility is server-only and must never be imported by client components. The public `GET /api/razorpay-key` endpoint returns only `{ key_id }` — the secret is never sent to the client in any form. The checkout API response (`POST /api/checkout`) returns `{ razorpay_order_id, razorpay_key_id, amount_paise, currency }` — no secret included.
 - **DECISION 26 (Checkout API Flow & Rollback Contract):** `POST /api/checkout` implements a strict multi-step transaction with rollback semantics: (1) call `reserve_inventory` RPC — if `INVENTORY_EXHAUSTED`, return 409 immediately; (2) call `getRazorpayKeys()` and create Razorpay order via SDK; (3) if Razorpay fails, call `release_reservation(order_id)` to undo `reserved_count` increments, then return 502; (4) on success, insert `orders` row with `status: 'pending'` and return `razorpay_order_id` + public `key_id`. The `orders` table has columns: `id`, `user_id`, `razorpay_order_id` (unique), `status` (enum: pending/paid/failed/refunded), `amount_paise`, `currency`, `items` jsonb, `shipping_address` jsonb, `created_at`. Inventory reservations have an optional `expires_at` for future TTL enforcement — a background expiry job is deferred to Sprint 6.
+- **DECISION 27 (Webhook Security Pattern):** `app/api/webhooks/razorpay/route.ts` uses `export const runtime = 'nodejs'` to access Node.js `crypto`. Raw request body is read via `request.text()` — never `request.json()` — to preserve the exact byte sequence required for HMAC verification. Signature is verified with `crypto.timingSafeEqual(Buffer.from(expectedSig, 'hex'), Buffer.from(receivedSig, 'hex'))` to prevent timing oracle attacks. The route ALWAYS returns HTTP 200, even on signature mismatch or processing error, to prevent Razorpay from retrying with replay attacks. Idempotency is enforced by checking `orders.status === 'paid'` before calling `finalize_inventory` — duplicate webhook deliveries are safe. `webhookSecret` is sourced from `getRazorpayKeys()` (encrypted `store_settings`), never from `.env`.
+- **DECISION 28 (Post-Payment Cart-Clearing Contract):** After a successful Razorpay payment, the user is redirected to `/checkout/success?order_id=<id>`. This page is a Server Component that fetches the order from Supabase by `order_id` and renders items, shipping address, and total. It mounts `<ClearCartOnSuccess />` — a minimal `"use client"` island that calls `cart.clear()` in a `useEffect` on first mount only and renders `null`. This two-component split is required because `cart.clear()` depends on Zustand's `localStorage`-persisted store which is only available client-side. The Server Component must NOT import the cart store directly.
+- **DECISION 29 (Admin Orders View):** `/admin/orders` is a Server Component that fetches the latest 50 orders (ordered by `created_at DESC`) using `getServerSupabase()` and passes them to `<OrdersTable />` — a `"use client"` island. `OrdersTable` renders a sortable table with columns: Order ID, Customer, Amount, Status, Created. `<OrdersTableSkeleton />` is the Suspense fallback. The `orders` list must never be fetched client-side with the anon key; always use the service-role client server-side.
+- **DECISION 30 (Shiprocket Token Management — Per-Request Model):** `lib/utils/getShiprocketToken.ts` is a server-only utility that fetches the Shiprocket `email` and `password` from `store_settings` (encrypted, per DECISION 3 + DECISION 11), then POSTs to `https://apiv2.shiprocket.in/v1/external/auth/login` to obtain a Bearer token. The token is returned directly to the caller — there is NO module-level mutable variable caching it between requests. This per-request model is the safe default in a serverless environment where module state can persist unpredictably across invocations. A Redis/in-memory cache with expiry TTL matching Shiprocket's token lifetime is the approved upgrade path for Sprint 8+, but must not introduce stale tokens.
+- **DECISION 31 (Shiprocket Fulfillment Route — Admin-Only, Error Mapping, Idempotency):** `POST /api/admin/orders/[id]/fulfill` enforces admin access by calling `supabase.auth.getUser()` (NOT `getSession()` — `getUser()` re-validates with the Supabase auth server on every call) and then checking `profiles.role === 'admin'`; returns 403 for any non-admin. Shiprocket API errors are mapped to meaningful HTTP statuses: pincode / serviceability errors → 400 `SERVICE_UNAVAILABLE`; all other Shiprocket failures → 502 `SHIPROCKET_ERROR`. Idempotency is enforced: if `fulfillment_status` is already set to a non-`unfulfilled` value, the route returns the existing fulfillment data (200) without re-calling Shiprocket. The route persists `shiprocket_order_id`, `shipment_id`, `awb_code`, `courier_name`, `label_url`, and `fulfillment_status` to the `orders` table as each step completes.
 
 ## 3. Known Constraints & Workarounds
 - **Supabase env vars required at runtime:** `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (client); `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server/middleware). The client intentionally does not throw on missing vars during build but will warn at runtime.
@@ -341,3 +346,70 @@ npm run typecheck   # should return 0 errors
 5. Set env vars: `SUPABASE_SERVICE_ROLE_KEY`, `SETTINGS_ENCRYPTION_KEY`.
 
 **Open items for Sprint 6:** Razorpay webhook handler (confirm payment → decrement `inventory`, update `orders.status = 'paid'`), reservation expiry background job, admin order management view, Cypress/Playwright e2e tests for checkout, Shadcn full init, storage bucket creation, profiles trigger `supabase db push`.
+
+---
+
+### Sprint 6 — Webhooks, Payment Confirmation & Order Management ✅ (27 Feb 2026)
+
+**Backend:**
+- `db/migrations/20260301_0010_finalize_inventory_rpc.sql` — `public.finalize_inventory(order_id uuid)` RPC: decrements `inventory_count` and `reserved_count` for each item in the order; sets `orders.status = 'paid'` and writes `paid_at = now()`. `public.fail_order(order_id uuid)` RPC: calls `release_reservation` and sets `orders.status = 'failed'`. `paid_at timestamptz` column added to `orders`. Both RPCs are `SECURITY DEFINER`.
+- `app/api/webhooks/razorpay/route.ts` — Node.js runtime (for `crypto`). Raw body read via `request.text()`. HMAC-SHA256 signature verification with `crypto.timingSafeEqual`. Idempotency check on `orders.status`. Calls `finalize_inventory` on `payment.captured`, `fail_order` on `payment.failed`. Always returns 200. `webhookSecret` from `getRazorpayKeys()`.
+- `scripts/send_webhook_twice.js` — sends same webhook payload twice to test idempotency (syntax error fixed in Sprint 7 QA).
+- `scripts/scan_getRazorpayKeys.js` — walks repo TS/TSX/JS files and reports any that reference `getRazorpayKeys`, for secret containment audits.
+- `db/tests/webhooks/` — signature forgery test, idempotency psql guide, Node idempotency test.
+
+**Frontend:**
+- `app/checkout/success/page.tsx` — Server Component; fetches order by `order_id` searchParam; renders items, shipping address, amount; mounts `<ClearCartOnSuccess />`.
+- `components/checkout/ClearCartOnSuccess.tsx` — `"use client"` island; calls `cart.clear()` in `useEffect` on mount; renders `null`.
+- `app/(admin)/orders/page.tsx` — Server Component; fetches latest 50 orders via `getServerSupabase()`; passes to `<OrdersTable />`.
+- `components/admin/orders/OrdersTable.tsx` — `"use client"` island; sortable table (Order ID, amount, status, date).
+- `components/admin/orders/OrdersTableSkeleton.tsx` — Suspense fallback skeleton.
+- `components/admin/Sidebar.tsx` — updated with Orders nav link.
+
+**QA fixes:**
+- HMAC `timingSafeEqual` comparison confirmed correct (equal-length buffer comparison).
+- `err: unknown` narrowing applied throughout webhook route.
+- Secret containment confirmed by `scan_getRazorpayKeys.js` — no client-component imports.
+- Idempotency double-fire test added (`send_webhook_twice.js`).
+
+**Critical manual steps before Sprint 7:**
+1. Apply migration: `psql $DATABASE_URL -f db/migrations/20260301_0010_finalize_inventory_rpc.sql`.
+2. Set `RAZORPAY_WEBHOOK_SECRET` encrypted in `store_settings` under key `RAZORPAY_WEBHOOK_SECRET`.
+3. Configure Razorpay Dashboard webhook URL to point at `/api/webhooks/razorpay`.
+
+**Open items for Sprint 7:** Shiprocket API integration for order fulfillment, AWB generation, shipping label fetch, admin fulfillment UI.
+
+---
+
+### Sprint 7 — Shiprocket Shipping Automation ✅ (27 Feb 2026)
+
+**Backend:**
+- `db/migrations/20260301_0011_orders_shiprocket_columns.sql` — adds `shiprocket_order_id text`, `shipment_id text`, `awb_code text`, `courier_name text`, `label_url text`, `fulfillment_status text` (default `'unfulfilled'`) to the `orders` table.
+- `lib/utils/getShiprocketToken.ts` — server-only utility; fetches `SHIPROCKET_EMAIL` and `SHIPROCKET_PASSWORD` from encrypted `store_settings`; POSTs to Shiprocket auth endpoint; returns `{ token }`. Per-request model — no module-level cache (per DECISION 30).
+- `app/api/admin/orders/[id]/fulfill/route.ts` — admin-only (DECISION 31). Full fulfillment flow: `getUser()` auth check → `profiles.role` admin check → fetch order → `getShiprocketToken()` → `POST /orders/create/adhoc` → `POST /courier/assign/awb` → `GET /courier/generate/label` → update all Shiprocket columns + `fulfillment_status = 'manifested'`. Error mapping: pincode/serviceability → 400; generic Shiprocket failure → 502. Idempotent on non-`unfulfilled` status.
+- `db/tests/shiprocket/01_invalid_pincode_guide.md` — manual test for serviceability error path.
+- `db/tests/shiprocket/02_admin_rls_check.md` — manual test for non-admin 403 enforcement.
+- `db/tests/shiprocket/03_token_caching_notes.md` — documents per-request model and Redis upgrade path.
+- `docs/api_contract.md` — updated with `POST /api/admin/orders/[id]/fulfill` endpoint spec.
+
+**Frontend:**
+- `app/(admin)/orders/[id]/page.tsx` — Server Component; fetches full order including Shiprocket columns; mounts `<FulfillmentCard />` in a `<Suspense>` with `<OrderDetailSkeleton />` fallback.
+- `components/admin/orders/FulfillmentCard.tsx` — `"use client"` island; shows shipping address + fulfillment status badge; if `fulfillment_status === 'unfulfilled'`, renders "Fulfill with Shiprocket" button; POST to fulfill route → displays AWB, courier, and label download link on success; inline error message on failure. `disabled={loading}`, `aria-label`, `role="status"` on message div.
+- `components/admin/orders/OrderDetailSkeleton.tsx` — animated pulse skeleton for the order detail page.
+- `tests/shiprocket/fulfillment.test.ts` — test stub.
+
+**QA fixes (Sprint 7 QA sweep — 5 fixes across 4 files):**
+
+| File | Fix |
+|------|-----|
+| `app/api/admin/orders/[id]/fulfill/route.ts` | `getSession()` → `getUser()` (re-validates with auth server; `getSession()` is unsafe for admin checks) |
+| `lib/utils/getShiprocketToken.ts` | `catch (e)` → `catch (_e)` (explicit unused-variable annotation) |
+| `components/admin/orders/FulfillmentCard.tsx` | `catch(err)` narrowed: `const msg = err instanceof Error ? err.message : 'Network error...'`; redundant `role="button"` removed from `<button>` |
+| `scripts/send_webhook_twice.js` | `'--': '...'` syntax error → JS comment (`// -- replace with realistic structure`) |
+
+**Critical manual steps before Sprint 8:**
+1. Apply migration: `psql $DATABASE_URL -f db/migrations/20260301_0011_orders_shiprocket_columns.sql`.
+2. Store Shiprocket credentials encrypted in `store_settings` under keys `SHIPROCKET_EMAIL` and `SHIPROCKET_PASSWORD`.
+3. Assign admin role to the fulfillment operator account before testing the fulfill route.
+
+**Open items for Sprint 8:** Inventory TTL expiry background job, Shiprocket webhook for delivery status updates, storefront order tracking page, Cypress/Playwright e2e tests, Shadcn full init, storage bucket creation, profiles trigger `supabase db push`.
