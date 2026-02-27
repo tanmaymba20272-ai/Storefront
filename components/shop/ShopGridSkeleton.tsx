@@ -1,5 +1,5 @@
 import React from 'react'
-import Skeleton from '../ui/skeleton'
+import Skeleton from '../ui/skeleton-component'
 
 export default function ShopGridSkeleton() {
   return (

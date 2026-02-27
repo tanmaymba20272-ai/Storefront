@@ -3,7 +3,7 @@ import Link from 'next/link'
 import HeroSection from '../../components/home/HeroSection'
 import ProductCard from '../../components/ProductCard'
 import DropCountdown from '../../components/DropCountdown'
-import Skeleton from '../../components/ui/skeleton'
+import Skeleton from '../../components/ui/skeleton-component'
 import { getPublishedProducts, getActiveAndUpcomingDrops } from '../../lib/actions/catalog'
 import type { ProductListItem, DropListItem } from '../../lib/actions/catalog'
 

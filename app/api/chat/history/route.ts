@@ -23,10 +23,9 @@ export async function GET(request: Request) {
       {
         cookies: {
           getAll: () => cookieStore.getAll(),
-          setAll: (cookiesToSet) => {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options)
-            })
+          setAll: (cookiesToSet: Array<{ name: string; value: string; options: Record<string, unknown> }>) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options as any)) } catch {}
           },
         },
       }
@@ -50,10 +49,9 @@ export async function GET(request: Request) {
       {
         cookies: {
           getAll: () => cookieStore.getAll(),
-          setAll: (cookiesToSet) => {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options)
-            })
+          setAll: (cookiesToSet: Array<{ name: string; value: string; options: Record<string, unknown> }>) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options as any)) } catch {}
           },
         },
       }
@@ -83,7 +81,14 @@ export async function GET(request: Request) {
       })
     }
 
-    const sessionId = sessions[0].id
+    const sessionId = (sessions as Array<{ id: string }>)[0]?.id
+
+    if (!sessionId) {
+      return new Response(JSON.stringify({ messages: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
 
     // Fetch all messages from this session, ordered oldest first
     const { data: messages, error: messageError } = await supabase

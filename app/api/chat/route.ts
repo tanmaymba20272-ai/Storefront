@@ -354,18 +354,19 @@ Respond concisely and in plain text.`
             
             // Save bot message after stream closes (async, non-blocking)
             if (sessionId && botResponseText) {
-              setTimeout(() => {
-                supabase
-                  .from('chat_messages')
-                  .insert({
-                    session_id: sessionId,
-                    role: 'bot',
-                    text: botResponseText,
-                    intent: mode,
-                  })
-                  .catch((_err: unknown) => {
-                    // Silently fail
-                  })
+              setTimeout(async () => {
+                try {
+                  await supabase
+                    .from('chat_messages')
+                    .insert({
+                      session_id: sessionId,
+                      role: 'bot',
+                      text: botResponseText,
+                      intent: mode,
+                    })
+                } catch (_err: unknown) {
+                  // Silently fail
+                }
               }, 0)
             }
           }
