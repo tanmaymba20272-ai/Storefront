@@ -22,6 +22,53 @@ await fetch('/api/validate-cart', {
 })
 ```
 
+## Frontend Checkout Flow
+
+Example client usage for the `POST /api/checkout` flow and how to open Razorpay's checkout with the returned values:
+
+```ts
+const res = await fetch('/api/checkout', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ cart_items, shipping_address }),
+  credentials: 'include',
+})
+if (!res.ok) throw new Error('Checkout initialization failed')
+const payload = await res.json()
+// payload: { razorpay_order_id, razorpay_key_id, amount_paise, currency }
+
+// idempotent SDK load
+if (!document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
+  const s = document.createElement('script')
+  s.src = 'https://checkout.razorpay.com/v1/checkout.js'
+  s.async = true
+  document.body.appendChild(s)
+  await new Promise((resolve, reject) => {
+    s.onload = resolve
+    s.onerror = reject
+  })
+}
+
+const Razorpay = (window as any).Razorpay
+const r = new Razorpay({
+  key: payload.razorpay_key_id,
+  amount: payload.amount_paise,
+  currency: payload.currency,
+  order_id: payload.razorpay_order_id,
+  handler: (response: any) => {
+    // payment success handling (server will verify and finalize)
+  },
+  prefill: { name: shipping_address.fullName, contact: shipping_address.phone },
+  modal: { ondismiss: () => { /* handle dismissal */ } }
+})
+r.open()
+```
+
+Notes:
+- The frontend should never include Razorpay secret keys; use only the public `razorpay_key_id` returned by the server.
+- Handle 409 `INVENTORY_EXHAUSTED` responses by applying `adjusted_items` to the local cart and showing inline errors before retrying checkout.
+
+
 ### Notes
 - The server wrapper `lib/actions/cart.ts` uses `getServerSupabase()` and calls the `validate_cart` RPC. Ensure `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set in the server environment.
 - The frontend expects `adjusted_items` to be an array of `{ sku, quantity }` and `errors` to include `{ sku, message }`.
@@ -240,6 +287,51 @@ Security & Performance Notes:
 - All filtering, pagination and searching is executed server-side and selects only necessary columns (avoid `SELECT *`).
 - When `query` is provided, the actions prefer Postgres full-text search (`to_tsvector`) to leverage DB indexes. Otherwise they use indexed filters (e.g., category id) for performance.
 - These endpoints are good candidates for short TTL edge caching (e.g., 60s) to reduce DB load during high-traffic drops.
+
+## Checkout API
+
+### POST /api/checkout
+
+- **Purpose**: Server-side checkout endpoint. Reserves inventory, creates a Razorpay order, and inserts an `orders` row with status `pending`.
+- **Request JSON**:
+
+```json
+{
+  "cart_items": [ { "sku": "SKU-A", "quantity": 2 } ],
+  "shipping_address": { "line1": "...", "city": "..." }
+}
+```
+
+- **Response (200)**:
+
+```json
+{
+  "razorpay_order_id": "order_XXXXXXXX",
+  "razorpay_key_id": "rzp_test_xxx",
+  "amount_paise": 20000,
+  "currency": "INR"
+}
+```
+
+- **Error Cases**:
+  - 401 `AUTH_REQUIRED` — user must be authenticated (orders.user_id is NOT NULL in this sprint).
+  - 409 `INVENTORY_EXHAUSTED` — returned when requested qty exceeds available stock.
+  - 502 `RAZORPAY_ORDER_FAILED` — Razorpay order creation failed; reserved inventory is released.
+
+### GET /api/razorpay-key
+
+- **Purpose**: Public endpoint to retrieve the public `RAZORPAY_KEY_ID` (no secret). Useful for client-side checkout flows that only need the key id.
+- **Response (200)**:
+
+```json
+{ "key_id": "rzp_test_xxx" }
+```
+
+- The endpoint reads `RAZORPAY_KEY_ID` from `store_settings`, decrypts it server-side, and returns the ID only. Do NOT store or return `RAZORPAY_KEY_SECRET` from any public endpoint.
+
+Security notes:
+- Server-side code uses `getServerSupabase()` and server credentials to call RPCs that modify inventory (`reserve_inventory`). All inventory-modifying RPCs are `SECURITY DEFINER` and should be owned by the DB service-role user.
+- Reservation expiry/TTL is handled out-of-band in a future sprint — reservations created in `inventory_reservations` should be cleaned by a scheduled job that calls `release_reservation(order_id)` for expired entries.
 
 
 /* 3) Server Action / TypeScript shapes (callable from Next.js Server Actions)

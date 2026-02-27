@@ -2,7 +2,7 @@
 *This file acts as the persistent brain for the agentic team. It MUST be read before any code is written and updated whenever a major architectural decision is made or a sprint is completed.*
 
 ## 1. Active Context
-- **Current Phase:** Sprint 5 planning (Sprint 4 complete ✅ — 27 Feb 2026).
+- **Current Phase:** Sprint 6 planning (Sprint 5 complete ✅ — 27 Feb 2026).
 - **Project Goal:** Building a highly responsive, modern e-commerce web app for a sustainable fashion brand with full Shopify parity.
 - **Key Mechanics:** The brand relies on a limited-drop model (requiring strict inventory control) and operates out of India (requiring local payment and shipping logistics).
 
@@ -30,6 +30,9 @@
 - **DECISION 21 (Validate Cart RPC — Validation-Only Pattern):** Cart stock validation uses a dedicated `public.validate_cart(cart_items jsonb, customer_id uuid) RETURNS jsonb` RPC with `SECURITY DEFINER`. It applies `SELECT … FOR UPDATE` row-level locks on each `products` row to prevent concurrent oversell races. Returns `{ valid: boolean, errors: jsonb, adjusted_items: jsonb }` where `adjusted_items` uses the key `adjusted_quantity` (not `quantity`). The function is **validation-only** — it never decrements inventory. Any stateful reservation must be a separate `hold_cart` RPC. Clients MUST call this RPC server-side via `SUPABASE_SERVICE_ROLE_KEY`; the anon key must never be used for inventory-sensitive operations. Direct client-side `UPDATE` of `products.inventory` or `products.reserved_count` is blocked by RLS policy.
 - **DECISION 22 (Cart Persist + Hydration Guard Pattern):** `store/cartStore.ts` uses Zustand `persist` middleware with `localStorage`. A `useHydrated()` hook (or `isHydrated` flag in the store) gates any SSR-sensitive renders. Cart-related UI that reads persisted state — particularly count badges and drawer content — must check `useHydrated()` before rendering to prevent React hydration mismatches. Store exposes: `items`, `addItem`, `removeItem`, `setQuantity`, `clear`, `isOpen`, `open`, `close`, `toggle`. `CartItem` type is canonical in `types/cart.ts` (not re-declared in the store).
 - **DECISION 23 (Server Action for Cart Validation):** `lib/actions/cart.ts` exports `validateCart(cartItems, customerId?)` as a typed server action using `getServerSupabase()` from `lib/supabaseClient.ts`. The API route `app/api/validate-cart/route.ts` wraps this action for REST clients. Results are typed via `ValidateCartResult` and `ValidateCartError` from `types/cart.ts`. Downstream components (CartDrawer, checkout) must import these types from `types/cart.ts` — never redeclare them inline. The optimistic cart flow is: (1) disable button + show spinner, (2) call `validateCart`, (3a) `valid: true` → `router.push('/checkout')`, (3b) `valid: false` → apply `adjusted_items` to store and surface `errors` inline without navigating.
+- **DECISION 24 (Stateful Inventory Reservation Pattern):** Sprint 5 introduces `public.reserve_inventory(cart_items jsonb, order_id uuid) RETURNS jsonb` — a stateful RPC that **increments `reserved_count`** on each product row (using `SELECT … FOR UPDATE`) and inserts rows into `public.inventory_reservations`. It returns `{ success: true }` or `{ success: false, error: 'INVENTORY_EXHAUSTED', sku }`. Critically: it does NOT decrement `inventory` — that happens only on webhook confirmation (Sprint 6). A paired `public.release_reservation(order_id uuid)` RPC reverses the `reserved_count` increment and deletes reservation rows; it **must** be called if any downstream step (e.g., Razorpay order creation) fails. Both RPCs are `SECURITY DEFINER` and must be owned by the service-role DB user. Direct client writes to `reserved_count` are blocked by RLS.
+- **DECISION 25 (Razorpay Key Storage & Server-Only Access):** Razorpay credentials (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`) are stored encrypted in `store_settings` (DECISION 3 + DECISION 11). They are retrieved exclusively via `lib/utils/getRazorpayKeys.ts` which calls `getServerSupabase()` and `decryptSettings()`. This utility is server-only and must never be imported by client components. The public `GET /api/razorpay-key` endpoint returns only `{ key_id }` — the secret is never sent to the client in any form. The checkout API response (`POST /api/checkout`) returns `{ razorpay_order_id, razorpay_key_id, amount_paise, currency }` — no secret included.
+- **DECISION 26 (Checkout API Flow & Rollback Contract):** `POST /api/checkout` implements a strict multi-step transaction with rollback semantics: (1) call `reserve_inventory` RPC — if `INVENTORY_EXHAUSTED`, return 409 immediately; (2) call `getRazorpayKeys()` and create Razorpay order via SDK; (3) if Razorpay fails, call `release_reservation(order_id)` to undo `reserved_count` increments, then return 502; (4) on success, insert `orders` row with `status: 'pending'` and return `razorpay_order_id` + public `key_id`. The `orders` table has columns: `id`, `user_id`, `razorpay_order_id` (unique), `status` (enum: pending/paid/failed/refunded), `amount_paise`, `currency`, `items` jsonb, `shipping_address` jsonb, `created_at`. Inventory reservations have an optional `expires_at` for future TTL enforcement — a background expiry job is deferred to Sprint 6.
 
 ## 3. Known Constraints & Workarounds
 - **Supabase env vars required at runtime:** `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (client); `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server/middleware). The client intentionally does not throw on missing vars during build but will warn at runtime.
@@ -291,3 +294,50 @@ npm run typecheck   # should return 0 errors
 5. Run cart SQL tests: `psql $DATABASE_URL -f db/tests/validate_cart/01_valid_cart.sql && psql $DATABASE_URL -f db/tests/validate_cart/02_partial_shortfall.sql`.
 
 **Open items for Sprint 5:** Razorpay checkout integration, `hold_cart` RPC for reservations, order creation flow, admin CRUD forms (wire Zod schemas), Cypress/Playwright e2e, Shadcn full init, storage bucket creation, profiles trigger `supabase db push`.
+
+---
+
+### Sprint 5 — Razorpay Checkout & High-Concurrency Locking ✅ (27 Feb 2026)
+
+**Backend:**
+- `db/migrations/20260227_0008_create_orders_table.sql` — `public.orders` table with `id`, `user_id`, `razorpay_order_id` (unique), `status` (pending/paid/failed/refunded), `amount_paise`, `currency`, `items jsonb`, `shipping_address jsonb`, `created_at`. Indexes on `user_id` and `razorpay_order_id`. RLS guidance comments for owner-read / service-role-write.
+- `db/migrations/20260227_0009_reserve_inventory_rpc.sql` — `public.reserve_inventory(cart_items jsonb, order_id uuid)` RPC with `FOR UPDATE` locking; increments `reserved_count` and inserts `inventory_reservations` rows on success; returns `INVENTORY_EXHAUSTED` without mutation on failure. `public.release_reservation(order_id uuid)` RPC reverses increments and deletes reservation rows. Both are `SECURITY DEFINER`. `public.inventory_reservations` table created with `id`, `order_id`, `product_id`, `quantity`, `created_at`, `expires_at`.
+- `lib/utils/getRazorpayKeys.ts` — server-only utility using `getServerSupabase()` + `decryptSettings()`. Returns `{ keyId, keySecret }` for server SDK use only.
+- `app/api/checkout/route.ts` — full checkout orchestration: `reserve_inventory` → Razorpay order creation → `release_reservation` on failure → `orders` row insert → return public-safe response (`{ razorpay_order_id, razorpay_key_id, amount_paise, currency }`).
+- `app/api/razorpay-key/route.ts` — public-safe `GET` returning only `{ key_id }`; no secret in response.
+- `db/tests/checkout/` — `01_reserve_success.sql`, `02_reserve_conflict.sql` (two-session psql concurrency simulation), `03_release_on_razorpay_fail.md` (rollback verification guide), `01_concurrency_instructions.md`.
+- `docs/api_contract.md` — appended `/api/checkout` and `/api/razorpay-key` payload/response schemas.
+
+**Frontend:**
+- `lib/validations/checkout.ts` — `ShippingSchema` (fullName, line1, city, state, pincode ×6-digit, phone ×10-digit, country) + inferred `ShippingFormData`.
+- `lib/razorpay.d.ts` — ambient global types for `window.Razorpay`, `RazorpayOptions`, `RazorpayResponse`.
+- `app/checkout/page.tsx` — Server Component wrapper with Suspense + `CheckoutSkeleton` fallback.
+- `components/checkout/CheckoutForm.tsx` — `"use client"`. `react-hook-form` + Zod. Order summary with GST 18% computation. Calls `POST /api/checkout` → dynamically injects `checkout.razorpay.com/v1/checkout.js` → opens `window.Razorpay` modal → navigates to `/checkout/processing` on success. Shows `INVENTORY_EXHAUSTED` inline error on 409. Buttons disabled during network/script load.
+- `components/checkout/CheckoutSkeleton.tsx` — skeleton matching form + summary layout (DECISION 18 pattern).
+- `app/checkout/processing/page.tsx` — static order-received confirmation page.
+- `tests/checkout/checkoutFlow.test.ts` — test stub with TODO comments.
+
+**QA fixes across Sprint 5 files:**
+
+| File | Fix |
+|------|-----|
+| `lib/supabaseClient.ts` | Warn when `SUPABASE_SERVICE_ROLE_KEY` is missing; prefer it for `getServerSupabase()` |
+| `db/migrations/20260227_0009_reserve_inventory_rpc.sql` | `SECURITY DEFINER` added to both RPCs; comments on owner assignment |
+| `app/api/checkout/route.ts` | `err: any` → `unknown`; safe user extraction; `release_reservation` called on Razorpay failure |
+| `app/api/razorpay-key/route.ts` | `err: any` → `unknown`; confirmed no secret in response |
+| `app/checkout/page.tsx` | Removed duplicate client export causing TSX error |
+| `components/checkout/CheckoutForm.tsx` | Removed `any` on cart store; `unknown` catch narrowing; coerced subtotal math |
+
+**Security audit outcome:**
+- `RAZORPAY_KEY_SECRET` is never present in any client bundle, frontend component, or API response.
+- `lib/encryption.ts` is not imported by any client component — confirmed by inspection.
+- `docs/api_contract.md` contains no real credentials.
+
+**Critical manual steps before Sprint 6:**
+1. `npm install && npx tsc --noEmit` — confirm 0 errors after installs.
+2. Apply migrations: `psql $DATABASE_URL -f db/migrations/20260227_0008_create_orders_table.sql && psql $DATABASE_URL -f db/migrations/20260227_0009_reserve_inventory_rpc.sql`
+3. Set function owners: `ALTER FUNCTION public.reserve_inventory(jsonb,uuid) OWNER TO <service_role_user>; ALTER FUNCTION public.release_reservation(uuid) OWNER TO <service_role_user>;`
+4. Store Razorpay keys in `store_settings` table (encrypted via admin dashboard) before testing checkout.
+5. Set env vars: `SUPABASE_SERVICE_ROLE_KEY`, `SETTINGS_ENCRYPTION_KEY`.
+
+**Open items for Sprint 6:** Razorpay webhook handler (confirm payment → decrement `inventory`, update `orders.status = 'paid'`), reservation expiry background job, admin order management view, Cypress/Playwright e2e tests for checkout, Shadcn full init, storage bucket creation, profiles trigger `supabase db push`.

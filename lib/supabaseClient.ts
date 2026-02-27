@@ -59,7 +59,12 @@ let _serverSupabase: SupabaseClient<Database> | null = null
 export function getServerSupabase(): SupabaseClient<Database> {
   if (_serverSupabase) return _serverSupabase
   const url = process.env.SUPABASE_URL ?? ''
-  const key = process.env.SUPABASE_ANON_KEY ?? ''
+  // Prefer service role key for server-side privileged operations
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? ''
+  if (!url || !key) {
+    // eslint-disable-next-line no-console
+    console.warn('[getServerSupabase] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+  }
   _serverSupabase = createClient<Database>(url, key)
   return _serverSupabase
 }
