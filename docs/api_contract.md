@@ -97,4 +97,60 @@ export interface ApiContract {
  - `store_settings` should not be requested from client-side code unless the user is an admin.
  - Use server-side endpoints (with the Supabase service role) for operations that require admin privileges.
  - Public storefront reads (products, categories, drops, published blog_posts) are allowed for authenticated users.
+/* Additional Backend Deliverables (Sprint 2)
+ *
+ * 1) Profiles auto-creation trigger
+ *    - When a new row is inserted into `auth.users`, the DB trigger
+ *      `public.create_profile_after_auth_user()` will ensure a matching
+ *      `public.profiles` row exists with `role = 'customer'` by default.
+ *    - Server integrators: no extra server calls are required to create
+ *      profiles; the trigger runs inside Postgres. If you rely on profile
+ *      metadata shortly after signup, consider short retries on reads due to
+ *      transactional propagation in some environments.
+ *
+ * 2) RPC: `search_products(query text, limit int)`
+ *    - Returns product rows matching the `name` or `description` using
+ *      Postgres full-text search (`to_tsvector`). Example SQL (server-side):
+ */
+
+/*
+CREATE OR REPLACE FUNCTION public.search_products(q text, limit int DEFAULT 25)
+RETURNS SETOF public.products
+LANGUAGE sql STABLE
+AS $$
+  SELECT p.*
+  FROM public.products p
+  WHERE (
+    to_tsvector('simple', coalesce(p.name, '')) || to_tsvector('simple', coalesce(p.description, ''))
+  ) @@ plainto_tsquery('simple', q)
+  ORDER BY ts_rank(
+    to_tsvector('simple', coalesce(p.name, '')) || to_tsvector('simple', coalesce(p.description, '')),
+    plainto_tsquery('simple', q)
+  ) DESC
+  LIMIT coalesce(limit, 25);
+$$;
+*/
+
+/* 3) Server Action / TypeScript shapes (callable from Next.js Server Actions)
+ *    - These actions should be implemented server-side and use the
+ *      Supabase service role key. Examples below describe the TypeScript
+ *      parameter/result shapes for the admin UI.
+ */
+
+export type SearchProductsParams = { query: string; limit?: number };
+export type SearchProductsResult = Product[];
+
+export type EncryptSettingParams = { key: string; value: string };
+export type EncryptSettingResult = { id: number; key: string; value_encrypted: string };
+
+/* Encryption utility
+ * - `lib/encryption.ts` provides `encryptSettings(value)` and `decryptSettings(ciphertextB64)`.
+ * - These are server-only (use service role) and require SETTINGS_ENCRYPTION_KEY env var.
+ */
+
+/* Deployment notes:
+ * - Implement server actions (Next.js Server Actions or API routes) that call
+ *   these RPCs and utilities using a Supabase client initialized with the
+ *   service role key. RLS will not apply to service-role operations.
+ */
 */

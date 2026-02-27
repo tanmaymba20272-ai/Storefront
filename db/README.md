@@ -30,3 +30,39 @@ Notes:
 - Migrations attempt to be idempotent where practical (DROP POLICY checks, IF NOT EXISTS for types/tables).
 - Supabase's service role (server key) bypasses RLS and is intended for trusted server-side operations.
 - If you are using Supabase, prefer `supabase db push` to keep migrations and remote schema in sync.
+
+New migrations (Sprint 2)
+-------------------------
+
+Files added in this sprint:
+- db/migrations/20260227_0005_create_profiles_trigger.sql  (auto-create profiles on auth.users INSERT)
+- db/migrations/20260227_0006_storage_policy_guidance.sql (storage RLS guidance and policy examples)
+
+Apply the new migrations with Supabase CLI (recommended):
+
+```bash
+# from repo root
+supabase db push
+```
+
+Or apply individually with psql (example):
+
+```bash
+PG_CONN="postgres://user:pass@host:5432/dbname"
+psql "$PG_CONN" -f db/migrations/20260227_0005_create_profiles_trigger.sql
+psql "$PG_CONN" -f db/migrations/20260227_0006_storage_policy_guidance.sql
+```
+
+Testing the profiles trigger locally
+-----------------------------------
+- Use the Supabase local emulator or a local Postgres where you can create the `auth` schema.
+- Run the verification script: `psql "$PG_CONN" -f db/tests/verify_profiles_trigger.sql`
+- If your hosted Supabase project doesn't allow DDL on `auth.users`, use the Supabase SQL editor
+	(Project -> SQL Editor) with a service role key, or test locally.
+
+Storage notes
+-------------
+- Bucket creation: use `supabase storage create-bucket <name> [--public]` or the Dashboard.
+- The guidance migration contains example RLS policies for `storage.objects` to restrict
+	inserts/deletes to admin profiles and allow public reads for specific buckets.
+

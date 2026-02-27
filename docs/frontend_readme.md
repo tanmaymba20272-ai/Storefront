@@ -1,3 +1,47 @@
+# Frontend README
+
+This document lists frontend routes, required env vars, and quick setup notes for Sprint 2 deliverables.
+
+Routes added
+- `/products` — product listing (server)
+- `/products/[slug]` — product detail (server)
+- `/drops` — active drops w/ countdown (server + client countdown)
+- `/admin/dashboard` — minimal admin dashboard (protected by `middleware.ts`)
+
+Supabase
+- Required env vars (development):
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY`
+  - Optional for middleware role checks: `SUPABASE_SERVICE_ROLE_KEY` (do NOT commit this key)
+
+Notes on middleware
+- `middleware.ts` enforces that a Supabase session cookie is present for `/admin` routes.
+- To strictly verify `profiles.role === 'admin'` in middleware, provide `SUPABASE_SERVICE_ROLE_KEY`.
+
+UI / packages
+- Minimal Tailwind-first UI primitives are included under `components/ui/` as fallbacks.
+- Recommended: run `npx shadcn-ui@latest init` to install and scaffold Shadcn UI if you prefer.
+- Optional packages used in components: `framer-motion`, `zustand`.
+  - Install locally: `npm install framer-motion zustand`
+
+Cart store
+- Located at `store/cartStore.ts`. Persists to `localStorage` and exposes `addItem`, `removeItem`, `updateQuantity`, `clearCart`, and drawer controls `open` / `close`.
+
+Admin
+- Admin pages are server components and rely on `middleware.ts` for access control. For additional client-side checks, query `profiles` from Supabase in admin client components if needed.
+
+Dev server
+- Start Next.js dev server as usual (example):
+```bash
+npm run dev
+```
+
+Tests
+- Basic test stubs are under `tests/` — these are placeholders. Install and configure your test runner (Jest + React Testing Library) before running.
+
+Further work (recommended)
+- Replace UI primitives by running `npx shadcn-ui@latest init` and following the shadcn docs.
+- Add stronger middleware verification using `SUPABASE_SERVICE_ROLE_KEY` on the server (already supported by the middleware file if provided).
 # Frontend README (Phase 1)
 
 This folder contains a minimal Next.js App Router TypeScript frontend scaffold for Phase 1 UI deliverables.

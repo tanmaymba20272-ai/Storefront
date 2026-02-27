@@ -1,4 +1,17 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+
+let serverSupabase: SupabaseClient | null = null
+
+export function getServerSupabase() {
+  if (serverSupabase) return serverSupabase
+  const url = process.env.SUPABASE_URL || ''
+  const key = process.env.SUPABASE_ANON_KEY || ''
+  serverSupabase = createClient(url, key)
+  return serverSupabase
+}
+
+export default getServerSupabase()
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import type {
   Profile,
   Category,

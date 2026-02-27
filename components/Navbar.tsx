@@ -1,3 +1,23 @@
+"use client"
+import React from 'react'
+import { useCartStore } from '../store/cartStore'
+
+export default function Navbar() {
+  const open = useCartStore((s) => s.open)
+  const count = useCartStore((s) => s.items.reduce((c, it) => c + it.quantity, 0))
+
+  return (
+    <header className="w-full border-b p-4 flex items-center justify-between">
+      <div className="font-bold">Storefront</div>
+      <div className="flex items-center space-x-4">
+        <button aria-label="Open cart" onClick={() => open()} className="relative">
+          Cart
+          {count > 0 ? <span className="ml-2 inline-block bg-black text-white text-xs px-2 py-1 rounded">{count}</span> : null}
+        </button>
+      </div>
+    </header>
+  )
+}
 'use client'
 import Link from 'next/link'
 import { useState } from 'react'
