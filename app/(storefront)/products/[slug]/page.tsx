@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
-export default function ProductDetailRedirect({ params }: { params: { slug: string } }) {
-  redirect(`/shop/${params.slug}`)
+export default async function ProductDetailRedirect({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  redirect(`/shop/${slug}`)
 }
 

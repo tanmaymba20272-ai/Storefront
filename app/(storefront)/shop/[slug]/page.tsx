@@ -4,6 +4,7 @@ import { getProductBySlug, getPublishedProducts } from '../../../../lib/actions/
 import ProductImageGallery from '../../../../components/ProductImageGallery'
 import VariantSelector from '../../../../components/products/VariantSelector'
 import AddToCartButton from '../../../../components/products/AddToCartButton'
+import ProductRecommendations from '../../../../components/shop/ProductRecommendations'
 import type { Variant } from '../../../../lib/actions/catalog'
 
 interface ProductDetailPageProps {
@@ -86,6 +87,9 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
               <div className="mt-8">
                 <ProductReviews productId={product.id} />
               </div>
+
+              {/* Recommended products */}
+              <ProductRecommendations productId={product.id} />
           </div>
         </div>
       </div>

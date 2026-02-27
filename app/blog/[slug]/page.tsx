@@ -8,8 +8,8 @@ import DOMPurify from 'isomorphic-dompurify';
 import ArticleLayout from '../../../components/blog/ArticleLayout';
 import ProductRecommendations from '../../../components/blog/ProductRecommendations';
 
-export async function generateMetadata({ params }: any): Promise<Metadata> {
-  const { slug } = params;
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
   const supabase = getServerSupabase();
   const { data } = await supabase.from('posts').select('title, excerpt, cover_image').eq('slug', slug).single();
 
@@ -36,8 +36,8 @@ export async function generateMetadata({ params }: any): Promise<Metadata> {
   } as any;
 }
 
-export default async function ArticlePage({ params }: any) {
-  const { slug } = params;
+export default async function ArticlePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   const supabase = getServerSupabase();
 
   const { data: post, error } = await supabase

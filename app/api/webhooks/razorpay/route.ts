@@ -115,5 +115,3 @@ export async function POST(request: Request) {
     return new NextResponse(JSON.stringify({ error: 'internal_error' }), { status: 500 });
   }
 }
-
-export default POST;

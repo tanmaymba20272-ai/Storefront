@@ -10,7 +10,7 @@ export default function AdminPage() {
   useEffect(() => {
     let mounted = true
     async function check() {
-      const { data, error } = await supabase.auth.getUser()
+      const { data } = await supabase.auth.getUser()
       if (!mounted) return
       const user = data?.user
       if (!user) {
@@ -33,12 +33,14 @@ export default function AdminPage() {
     return () => { mounted = false }
   }, [router])
 
-  if (loading) return <div>Checking permissions...</div>
+  if (loading) return <div className="flex min-h-screen items-center justify-center font-sans text-stone">Checking permissions…</div>
 
   return (
-    <section>
-      <h1 className="text-2xl font-semibold">Admin Dashboard</h1>
-      <p className="mt-4 text-slate-600">Admin-only content goes here.</p>
-    </section>
+    <main className="min-h-screen bg-cream px-6 py-16">
+      <div className="mx-auto max-w-screen-lg">
+        <h1 className="font-serif text-3xl text-navy md:text-4xl">Admin Dashboard</h1>
+        <p className="mt-4 font-sans text-stone">Admin-only content goes here.</p>
+      </div>
+    </main>
   )
 }

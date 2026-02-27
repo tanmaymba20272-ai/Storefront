@@ -5,11 +5,11 @@ import FulfillmentCard from '../../../../components/admin/orders/FulfillmentCard
 import OrderDetailSkeleton from '../../../../components/admin/orders/OrderDetailSkeleton'
 
 type Props = {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }
 
 export default async function Page({ params }: Props) {
-  const { id } = params
+  const { id } = await params
   const supabase = getServerSupabase()
 
   const { data: order, error } = await supabase

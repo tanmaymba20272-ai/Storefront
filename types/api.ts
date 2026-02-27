@@ -494,6 +494,51 @@ export interface Database {
         }
         Relationships: []
       }
+      chat_sessions: {
+        Row: {
+          id: string
+          user_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      chat_messages: {
+        Row: {
+          id: string
+          session_id: string
+          role: 'user' | 'bot'
+          text: string
+          intent: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          role: 'user' | 'bot'
+          text: string
+          intent?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          role?: 'user' | 'bot'
+          text?: string
+          intent?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: { [_ in never]: never }
     Functions: {
@@ -528,6 +573,16 @@ export interface Database {
       inventory_ttl_release: {
         Args: Record<PropertyKey, never>
         Returns: null
+      }
+      match_products: {
+        Args: { query_embedding: string; match_count: number }
+        Returns: {
+          id: string
+          name: string
+          slug: string
+          price_cents: number
+          similarity: number
+        }[]
       }
     }
     Enums: {

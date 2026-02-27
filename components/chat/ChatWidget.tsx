@@ -14,6 +14,49 @@ export default function ChatWidget() {
   const [hasUnread, setHasUnread] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const historyLoadedRef = useRef(false)
+
+  /**
+   * Load chat history on mount for authenticated users.
+   * Calls GET /api/chat/history to fetch the most recent session's messages.
+   * Fails gracefully — if fetch fails or user is anon, continues with empty messages.
+   */
+  useEffect(() => {
+    if (historyLoadedRef.current) return // Only load once
+
+    const loadHistory = async () => {
+      try {
+        const { data: authData } = await supabase.auth.getUser()
+        if (!authData?.user) {
+          // User is not authenticated — start with empty messages
+          return
+        }
+
+        // User is authenticated — fetch chat history
+        const response = await fetch('/api/chat/history', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        })
+
+        if (!response.ok) {
+          // Fetch failed (401, 500, etc.) — continue with empty messages gracefully
+          console.warn(`Failed to load chat history: ${response.status}`)
+          return
+        }
+
+        const { messages: historyMessages } = await response.json() as { messages: ChatMessage[] }
+        if (historyMessages && historyMessages.length > 0) {
+          setMessages(historyMessages)
+        }
+      } catch (_err) {
+        // Network error, parsing error, etc. — continue gracefully with empty messages
+        return
+      }
+    }
+
+    historyLoadedRef.current = true
+    loadHistory()
+  }, [])
 
   useEffect(() => {
     // example: mark unread when bot adds a message while closed

@@ -6,10 +6,25 @@ export const runtime = 'nodejs'
 import { getServerSupabase } from '../../../lib/supabaseClient'
 import { getLlmKey } from '../../../lib/utils/getLlmKey'
 import type { Product, Order } from '../../../types/api'
+import { Redis } from '@upstash/redis'
 
-// Dev-only in-memory sliding window rate limiter.
-// NOTE: This is not production-safe. Use Redis, Supabase KV, or another durable
-// store with atomic increments for production deployments.
+// Redis rate limiter (production-safe).
+// If env vars are missing, fall back to in-memory Map (dev-only).
+let redis: Redis | null = null
+const hasRedis = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
+
+if (hasRedis) {
+  redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL as string,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN as string,
+  })
+} else {
+  console.warn(
+    '[WARN] UPSTASH_REDIS_REST_URL and/or UPSTASH_REDIS_REST_TOKEN are missing. Falling back to in-memory rate limiter (dev-only). This is NOT production-safe and will not persist across serverless cold starts.'
+  )
+}
+
+// Dev-only in-memory sliding window rate limiter (fallback).
 const RATE_WINDOW_MS = 60_000
 const RATE_LIMIT = 10
 const buckets: Map<string, number[]> = new Map()
@@ -21,7 +36,31 @@ function getClientKey(req: Request, authUid?: string): string {
   return `ip:${ip}`
 }
 
-function rateLimitCheck(key: string): { allowed: boolean; retryAfter?: number } {
+async function rateLimitCheck(key: string): Promise<{ allowed: boolean; retryAfter?: number }> {
+  if (hasRedis && redis) {
+    // Redis INCR + EXPIRE pattern (atomic operations)
+    try {
+      const redisKey = `chat_rl:${key}`
+      const current = await redis.incr(redisKey)
+      
+      // Set expiry on first request in window
+      if (current === 1) {
+        await redis.expire(redisKey, 60)
+      }
+      
+      if (current > RATE_LIMIT) {
+        const ttl = await redis.ttl(redisKey)
+        return { allowed: false, retryAfter: Math.max(ttl || 60, 1) }
+      }
+      
+      return { allowed: true }
+    } catch (err: unknown) {
+      // If Redis fails, log but fall through to in-memory
+      console.error('[WARN] Redis rate limiter failed, falling back to in-memory:', err)
+    }
+  }
+
+  // Fallback: in-memory sliding window
   const now = Date.now()
   const windowStart = now - RATE_WINDOW_MS
   const arr = buckets.get(key) || []
@@ -68,7 +107,7 @@ function safeProductsForContext(rows: ProductQueryRow[]) {
 
 /**
  * Decodes a JWT **without server verification** — the extracted sub claim is
- * UNTRUSTED and must ONLY be used for the in-memory rate-limit bucket key.
+ * UNTRUSTED and must ONLY be used for the rate-limit bucket key.
  * All data-access decisions must use the validatedUid returned by getUser().
  */
 function decodeJwtForUid(token: string | null): string | null {
@@ -113,7 +152,7 @@ export async function POST(req: Request) {
   const uid = decodeJwtForUid(token)
 
   const keyForRate = getClientKey(req, uid || undefined)
-  const rl = rateLimitCheck(keyForRate)
+  const rl = await rateLimitCheck(keyForRate)
   if (!rl.allowed) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
       status: 429,
@@ -130,6 +169,35 @@ export async function POST(req: Request) {
   if (token) {
     const { data: { user } } = await supabase.auth.getUser(token)
     validatedUid = user?.id ?? null
+  }
+
+  // Get or create chat session for authenticated users
+  let sessionId: string | null = null
+  if (validatedUid) {
+    try {
+      // Try to get the most recent session
+      const { data: existingSessions } = await supabase
+        .from('chat_sessions')
+        .select('id')
+        .eq('user_id', validatedUid)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      
+      if (existingSessions && existingSessions.length > 0) {
+        sessionId = (existingSessions[0] as { id: string }).id
+      } else {
+        // Create a new session
+        const { data: newSession } = await supabase
+          .from('chat_sessions')
+          .insert({ user_id: validatedUid })
+          .select('id')
+          .single()
+        sessionId = (newSession as { id: string } | null)?.id ?? null
+      }
+    } catch (_err: unknown) {
+      // If session creation fails, continue without persistence
+      sessionId = null
+    }
   }
 
   // Prepare injected context
@@ -212,6 +280,20 @@ Respond concisely and in plain text.`
   // Currently only OpenAI-style streaming is implemented. Providers may vary.
   if (llmKey.provider.includes('openai')) {
     try {
+      // Save user message if authenticated with session
+      if (sessionId) {
+        try {
+          await supabase.from('chat_messages').insert({
+            session_id: sessionId,
+            role: 'user',
+            text: body.message,
+            intent: mode,
+          })
+        } catch (_err: unknown) {
+          // Silently fail message persistence; don't block the response
+        }
+      }
+
       const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -232,6 +314,9 @@ Respond concisely and in plain text.`
         return new Response(JSON.stringify({ error: 'LLM did not return a stream', details: txt }), { status: 502 })
       }
 
+      // Capture full response for persistence
+      let botResponseText = ''
+
       const stream = new ReadableStream({
         async start(controller) {
           const reader = upstream.body!.getReader()
@@ -241,13 +326,48 @@ Respond concisely and in plain text.`
               const { done, value } = await reader.read()
               if (done) break
               const chunk = decoder.decode(value)
-              // Relay raw chunk to client — client should parse SSE/text events
+              // Relay raw chunk to client
               controller.enqueue(chunk)
+              
+              // Capture content tokens from SSE format (data: {"choices":[{"delta":{"content":"..."}}]})
+              try {
+                const lines = chunk.split('\n')
+                for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6)
+                    if (data === '[DONE]') continue
+                    const json = JSON.parse(data) as Record<string, unknown>
+                    const choices = (json.choices as Array<{ delta?: { content?: string } }>) || []
+                    if (choices[0]?.delta?.content) {
+                      botResponseText += choices[0].delta.content
+                    }
+                  }
+                }
+              } catch (_parseErr: unknown) {
+                // Silently ignore parsing errors
+              }
             }
           } catch (_e: unknown) {
             controller.enqueue(JSON.stringify({ error: 'Stream interrupted' }))
           } finally {
             controller.close()
+            
+            // Save bot message after stream closes (async, non-blocking)
+            if (sessionId && botResponseText) {
+              setTimeout(() => {
+                supabase
+                  .from('chat_messages')
+                  .insert({
+                    session_id: sessionId,
+                    role: 'bot',
+                    text: botResponseText,
+                    intent: mode,
+                  })
+                  .catch((_err: unknown) => {
+                    // Silently fail
+                  })
+              }, 0)
+            }
           }
         },
       })
@@ -266,5 +386,3 @@ Respond concisely and in plain text.`
 
   return new Response(JSON.stringify({ error: 'Unsupported LLM provider' }), { status: 500 })
 }
-
-export default POST

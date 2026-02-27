@@ -1,5 +1,3 @@
-"use server"
-
 import { NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabaseClient'
 import getRazorpayKeys from '../../../lib/utils/getRazorpayKeys'
@@ -136,5 +134,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'UNKNOWN_ERROR' }, { status: 500 })
   }
 }
-
-export default POST

@@ -196,6 +196,39 @@ const reader = r.body.getReader()
 - The server resolves the LLM API key from `store_settings` key `LLM_API_KEY` (encrypted). The server helper `lib/utils/getLlmKey.ts` decrypts the value with `decryptSettings()` and returns `{ provider, apiKey }`. The decrypted value may be a plain API key string or JSON with `{ provider, apiKey }`.
 - The current implementation supports OpenAI-style streaming. For other providers, extend the route to handle provider-specific streaming formats.
 
+### GET /api/chat/history
+
+- **Purpose**: Retrieve the chat message history for the authenticated user from the most recent session.
+- **Authentication**: Required. Client must provide an `Authorization: Bearer <token>` header with a valid Supabase JWT.
+- **Response**:
+
+```json
+{
+  "messages": [
+    {
+      "id": "uuid",
+      "role": "user" | "bot",
+      "text": "string",
+      "created_at": "ISO-8601 timestamp"
+    }
+  ]
+}
+```
+
+- **Errors**:
+  - `401` — No valid JWT provided or token verification failed.
+  - `500` — Database query or session lookup failed.
+
+- **Behavior**:
+  - Queries `chat_sessions` table filtered by `user_id = auth.uid()` and ordered by `created_at DESC` (most recent first).
+  - Retrieves the most recent session's messages from `chat_messages` table, ordered by `created_at ASC` (oldest first).
+  - Returns up to 50 messages (respects LLM context window limits).
+  - If no sessions exist for the user, returns an empty `messages` array.
+
+- **Client usage**:
+  - Called automatically by `ChatWidget` on mount if user is authenticated.
+  - Used to restore conversation state and maintain context across page refreshes.
+  - Frontend should gracefully handle failures (fallback to empty messages, silent continue).
 
 ## Webhooks
 

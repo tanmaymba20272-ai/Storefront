@@ -1,62 +1,122 @@
-import { getActiveAndUpcomingDrops } from '../../lib/actions/catalog'
-import DropCountdown from '../../components/DropCountdown'
+import { Suspense } from 'react'
 import Link from 'next/link'
+import HeroSection from '../../components/home/HeroSection'
+import ProductCard from '../../components/ProductCard'
+import DropCountdown from '../../components/DropCountdown'
+import Skeleton from '../../components/ui/skeleton'
+import { getPublishedProducts, getActiveAndUpcomingDrops } from '../../lib/actions/catalog'
+import type { ProductListItem, DropListItem } from '../../lib/actions/catalog'
 
-export default async function StorefrontPage() {
-  const drops = await getActiveAndUpcomingDrops()
-  const activeDrops = drops.filter((d) => d.status === 'active')
+/* ─── New Arrivals ──────────────────────────────────────────── */
+
+async function NewArrivalsGrid() {
+  const products: ProductListItem[] = await getPublishedProducts({ limit: 4, sort: 'newest' })
+  if (!products.length) {
+    return (
+      <p className="col-span-full py-8 text-center font-sans text-stone">
+        New arrivals coming soon.
+      </p>
+    )
+  }
+  return (
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      {products.map((product) => (
+        <ProductCard key={product.id} product={product} />
+      ))}
+    </div>
+  )
+}
+
+function NewArrivalsSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="flex flex-col gap-3">
+          <Skeleton className="aspect-[3/4] w-full rounded-none" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-1/3" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ─── Active Drops ──────────────────────────────────────────── */
+
+async function ActiveDropsSection() {
+  const drops: DropListItem[] = await getActiveAndUpcomingDrops()
+  if (!drops.length) return null
 
   return (
-    <div className="min-h-screen bg-cream">
-      {/* Hero */}
-      <section className="flex flex-col items-center justify-center gap-4 px-4 py-24 text-center">
-        <h1 className="font-serif text-5xl text-navy md:text-7xl">
-          Old Money.
-        </h1>
-        <p className="max-w-lg font-sans text-base text-stone">
-          Timeless sustainable fashion, crafted for those who dress with intention.
-        </p>
-        <Link
-          href="/shop"
-          className="mt-4 rounded-full bg-navy px-8 py-3 font-sans text-sm font-medium text-cream transition-colors hover:bg-forest"
-        >
-          Explore the Collection
-        </Link>
+    <section className="bg-ivory px-6 py-20">
+      <div className="mx-auto max-w-screen-xl">
+        <h2 className="mb-10 font-serif text-3xl text-navy md:text-4xl">Limited Drops</h2>
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {drops.map((drop) => (
+            <div
+              key={drop.id}
+              className="flex flex-col gap-4 border border-navy/10 bg-cream p-8"
+            >
+              <h3 className="font-serif text-xl text-navy">{drop.name}</h3>
+              {drop.end_at && <DropCountdown endsAt={drop.end_at} />}
+              <Link
+                href={`/shop?drop=${drop.id}`}
+                aria-label={`Shop the ${drop.name} drop`}
+                className="mt-2 inline-block border border-forest bg-forest px-6 py-3 text-center font-sans text-sm font-semibold uppercase tracking-widest text-ivory transition-colors duration-200 hover:bg-transparent hover:text-forest"
+              >
+                Shop the Drop
+              </Link>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ─── Page ──────────────────────────────────────────────────── */
+
+export default async function HomePage() {
+  return (
+    <main>
+
+      {/* 1. Hero */}
+      <HeroSection />
+
+      {/* 2. Featured Products */}
+      <section className="bg-ivory px-6 py-20">
+        <div className="mx-auto max-w-screen-xl">
+          <h2 className="mb-10 font-serif text-3xl text-navy md:text-4xl">New Arrivals</h2>
+          <Suspense fallback={<NewArrivalsSkeleton />}>
+            <NewArrivalsGrid />
+          </Suspense>
+        </div>
       </section>
 
-      {/* Active Drops */}
-      {activeDrops.length > 0 && (
-        <section className="mx-auto max-w-screen-xl px-4 pb-16">
-          <h2 className="mb-6 font-serif text-2xl text-navy">Active Drops</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {activeDrops.map((drop) => (
-              <div
-                key={drop.id}
-                className="flex flex-col justify-between gap-3 rounded-xl border border-gold/30 bg-ivory p-5"
-              >
-                <div>
-                  <span className="inline-block rounded-full border border-gold px-2 py-0.5 font-sans text-xs font-medium text-gold">
-                    Live Drop
-                  </span>
-                  <h3 className="mt-2 font-serif text-lg text-navy">{drop.name}</h3>
-                </div>
-                {drop.end_at && (
-                  <div className="flex items-center gap-2 font-sans text-sm text-stone">
-                    <span>Ends in</span>
-                    <DropCountdown endsAt={drop.end_at} />
-                  </div>
-                )}
-                <Link
-                  href={`/shop?drop=${drop.id}`}
-                  className="text-sm font-medium text-forest underline-offset-2 hover:underline"
-                >
-                  Shop this drop →
-                </Link>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
+      {/* 3. Active Drops */}
+      <Suspense fallback={null}>
+        <ActiveDropsSection />
+      </Suspense>
+
+      {/* 4. Brand manifesto strip */}
+      <section className="bg-navy px-6 py-14 text-center">
+        <p className="mx-auto max-w-2xl font-serif text-lg italic text-ivory md:text-2xl">
+          &ldquo;We believe fashion should outlast trends — made to last, designed to matter.&rdquo;
+        </p>
+      </section>
+
+      {/* 5. Footer CTA */}
+      <section className="bg-cream px-6 py-20 text-center">
+        <h2 className="font-serif text-3xl text-navy md:text-4xl">
+          Explore the full collection
+        </h2>
+        <Link
+          href="/shop"
+          className="mt-8 inline-block border border-navy bg-navy px-10 py-4 font-sans text-sm font-semibold uppercase tracking-widest text-ivory transition-colors duration-200 hover:bg-transparent hover:text-navy"
+        >
+          Shop All
+        </Link>
+      </section>
+    </main>
   )
 }

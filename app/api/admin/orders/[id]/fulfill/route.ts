@@ -176,5 +176,3 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return new Response(JSON.stringify({ error: 'SHIPROCKET_ERROR', details: message }), { status: 502, headers: { 'content-type': 'application/json' } })
   }
 }
-
-export default POST

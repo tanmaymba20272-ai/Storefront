@@ -1,12 +1,10 @@
 import { getServerSupabase } from '../lib/supabaseClient';
-import type { NextRequest } from 'next/server';
+import type { MetadataRoute } from 'next';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || '';
 
-export async function GET(_req: NextRequest) {
-  if (!SITE_URL) {
-    return new Response('NEXT_PUBLIC_SITE_URL is not set', { status: 500 });
-  }
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  if (!SITE_URL) return [];
 
   const supabase = getServerSupabase();
 
@@ -23,37 +21,23 @@ export async function GET(_req: NextRequest) {
     .eq('published', true)
     .eq('active', true);
 
-  const urls: { loc: string; lastmod?: string }[] = [];
+  const urls: MetadataRoute.Sitemap = [
+    { url: SITE_URL, lastModified: new Date() },
+  ];
 
   if (posts && Array.isArray(posts)) {
     for (const p of posts) {
       if (!p?.slug) continue;
-      urls.push({ loc: `${SITE_URL}/blog/${p.slug}`, lastmod: p.updated_at ?? undefined });
+      urls.push({ url: `${SITE_URL}/blog/${p.slug}`, lastModified: p.updated_at ? new Date(p.updated_at) : new Date() });
     }
   }
 
   if (products && Array.isArray(products)) {
     for (const p of products) {
       if (!p?.handle) continue;
-      urls.push({ loc: `${SITE_URL}/product/${p.handle}`, lastmod: p.updated_at ?? undefined });
+      urls.push({ url: `${SITE_URL}/product/${p.handle}`, lastModified: p.updated_at ? new Date(p.updated_at) : new Date() });
     }
   }
 
-  // base pages
-  urls.unshift({ loc: SITE_URL, lastmod: new Date().toISOString() });
-
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls
-    .map(u => {
-      const lastmod = u.lastmod ? `<lastmod>${new Date(u.lastmod).toISOString()}</lastmod>` : '';
-      return `<url><loc>${u.loc}</loc>${lastmod}</url>`;
-    })
-    .join('\n')}
-</urlset>`;
-
-  return new Response(xml, { headers: { 'Content-Type': 'application/xml' } });
+  return urls;
 }
-
-// NOTE: If the project upgrades to a Next version that exports a `sitemap()` helper,
-// adapt this implementation to return an array of `Url` objects (with `url` and `lastModified`).

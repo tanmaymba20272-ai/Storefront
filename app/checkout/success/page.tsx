@@ -3,12 +3,12 @@ import Link from 'next/link'
 import { getServerSupabase } from '../../../lib/supabaseClient'
 import ClearCartOnSuccess from '../../../components/checkout/ClearCartOnSuccess'
 
-type Props = { searchParams: { order_id?: string } }
+type Props = { searchParams: Promise<{ order_id?: string }> }
 
 const formatINR = (paise: number) => `₹${(paise / 100).toFixed(2)}`
 
 export default async function Page({ searchParams }: Props) {
-  const orderId = searchParams?.order_id
+  const { order_id: orderId } = await searchParams
 
   if (!orderId) {
     return (

@@ -1,5 +1,3 @@
-"use server"
-
 import { NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabaseClient'
 import { decryptSettings } from '../../../lib/encryption'
@@ -24,5 +22,3 @@ export async function GET() {
     return NextResponse.json({ error: 'UNKNOWN_ERROR' }, { status: 500 })
   }
 }
-
-export default GET

@@ -8,6 +8,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
     "strict": true,
     "noImplicitAny": true,
     "esModuleInterop": true,

@@ -1,0 +1,83 @@
+-- Migration: Create Supabase Storage buckets with RLS
+-- Date: 2026-03-01
+-- Purpose: Create three storage buckets with appropriate RLS policies
+-- NOTES:
+--   1. Supabase Storage bucket creation via raw SQL is limited. The primary approach
+--      is to use the Supabase CLI: `supabase storage create-bucket <name>`
+--   2. This migration documents the bucket structure and RLS policy patterns.
+--   3. For bucket creation in migrations, the Supabase Dashboard CLI or direct API
+--      calls are preferred (see commands below).
+--   4. RLS policies on storage.objects must be applied AFTER bucket creation.
+--
+-- REQUIRED MANUAL STEPS (via Supabase CLI):
+--
+--   # Create product-images bucket (private, admin RLS)
+--   supabase storage create-bucket product-images --permission private
+--
+--   # Create blog-media bucket (private, admin RLS)
+--   supabase storage storage create-bucket blog-media --permission private
+--
+--   # Create review-media bucket (public-read, auth path-prefix writes)
+--   supabase storage create-bucket review-media --permission public
+--
+-- RLS POLICIES (apply AFTER bucket creation via Supabase SQL editor):
+--
+--   -- product-images: Admin-only upload/delete
+--   CREATE POLICY "Admin upload product images" ON storage.objects
+--     FOR INSERT WITH CHECK (
+--       bucket_id = 'product-images'
+--       AND auth.role() = 'authenticated'
+--       AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+--     );
+--
+--   CREATE POLICY "Admin delete product images" ON storage.objects
+--     FOR DELETE USING (
+--       bucket_id = 'product-images'
+--       AND auth.role() = 'authenticated'
+--       AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+--     );
+--
+--   CREATE POLICY "Public read product images" ON storage.objects
+--     FOR SELECT USING (bucket_id = 'product-images');
+--
+--   -- blog-media: Admin-only upload/delete
+--   CREATE POLICY "Admin upload blog media" ON storage.objects
+--     FOR INSERT WITH CHECK (
+--       bucket_id = 'blog-media'
+--       AND auth.role() = 'authenticated'
+--       AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+--     );
+--
+--   CREATE POLICY "Admin delete blog media" ON storage.objects
+--     FOR DELETE USING (
+--       bucket_id = 'blog-media'
+--       AND auth.role() = 'authenticated'
+--       AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+--     );
+--
+--   CREATE POLICY "Public read blog media" ON storage.objects
+--     FOR SELECT USING (bucket_id = 'blog-media');
+--
+--   -- review-media: Public read, authenticated path-prefix writes (DECISION 34)
+--   CREATE POLICY "Public read review media" ON storage.objects
+--     FOR SELECT USING (bucket_id = 'review-media');
+--
+--   CREATE POLICY "User upload review media" ON storage.objects
+--     FOR INSERT WITH CHECK (
+--       bucket_id = 'review-media'
+--       AND auth.role() = 'authenticated'
+--       AND (storage.foldername(name))[1] = auth.uid()::text
+--     );
+--
+--   CREATE POLICY "User delete own review media" ON storage.objects
+--     FOR DELETE USING (
+--       bucket_id = 'review-media'
+--       AND auth.role() = 'authenticated'
+--       AND (storage.foldername(name))[1] = auth.uid()::text
+--     );
+--
+-- This migration is idempotent: running multiple times via CLI commands is safe.
+
+-- End of migration reminder
+-- NOTE: Raw SQL bucket creation is NOT supported in Supabase migrations.
+-- Use `supabase storage create-bucket <name>` from CLI after applying this migration.
