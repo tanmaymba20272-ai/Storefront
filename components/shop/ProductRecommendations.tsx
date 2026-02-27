@@ -35,14 +35,16 @@ async function ProductRecommendationsContent({
         {recommendations.slice(0, 6).map((product) => (
           <div key={product.id} className="flex-shrink-0 w-[200px] sm:w-[240px]">
             <ProductCard
-              name={product.name}
-              price_cents={product.price_cents}
-              image={
-                product.metadata?.images?.[0]
-                  ? (product.metadata.images[0] as string)
-                  : undefined
-              }
-              slug={product.slug ?? '#'}
+              product={{
+                id: product.id,
+                name: product.name,
+                slug: product.slug ?? '#',
+                price_cents: product.price_cents,
+                currency: 'INR',
+                metadata: product.metadata || { images: [] },
+                category: null,
+                drop: null,
+              }}
             />
           </div>
         ))}

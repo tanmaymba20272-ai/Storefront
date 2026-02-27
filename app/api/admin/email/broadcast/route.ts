@@ -1,5 +1,5 @@
-import { getServerSupabase } from 'lib/supabaseClient';
-import getEmailKey from 'lib/utils/getEmailKey';
+import { getServerSupabase } from '@/lib/supabaseClient';
+import getEmailKey from '@/lib/utils/getEmailKey';
 
 type BroadcastPayload = {
   subject: string;

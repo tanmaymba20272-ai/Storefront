@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getServerSupabase } from 'lib/supabaseClient';
+import { getServerSupabase } from '@/lib/supabaseClient';
 
 type EligibilityResult = { eligible: boolean };
 

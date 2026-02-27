@@ -109,7 +109,7 @@ export async function getProductRecommendations(
         return {
           id: p.id,
           name: p.name,
-          slug: p.slug,
+          slug: p.slug || p.id, // fallback to id if slug is null
           price_cents: p.price_cents,
           currency: p.currency || 'INR',
           metadata: { ...p.metadata, images },

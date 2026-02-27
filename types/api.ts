@@ -236,6 +236,7 @@ export interface Database {
           drop_id: string | null
           handle: string | null
           metadata: Record<string, unknown>
+          embedding: string | null
           updated_at: string | null
           created_at: string
         }
@@ -253,6 +254,7 @@ export interface Database {
           drop_id?: string | null
           handle?: string | null
           metadata?: Record<string, unknown>
+          embedding?: string | null
           updated_at?: string | null
           created_at?: string
         }
@@ -270,6 +272,7 @@ export interface Database {
           drop_id?: string | null
           handle?: string | null
           metadata?: Record<string, unknown>
+          embedding?: string | null
           updated_at?: string | null
           created_at?: string
         }
