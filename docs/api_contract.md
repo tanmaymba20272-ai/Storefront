@@ -163,6 +163,27 @@ This application accepts Razorpay webhooks at `/api/webhooks/razorpay` and follo
 
 - **Operational notes**:
   - All DB calls are performed server-side with the Supabase service-role client; webhooks never expose secrets to clients.
+
+## Email Broadcast API
+
+### POST /api/admin/email/broadcast
+
+- **Auth**: Admin session required. Server route verifies `profiles.role === 'admin'` using `getServerSupabase()`.
+- **Payload**: JSON `{ subject: string, html: string, test?: boolean }`.
+  - `test: true` sends only to the admin's email (useful for previewing). `test` omitted or false broadcasts to all recipients who have `marketing_opt_in = true` (fallback: all profiles with email).
+- **Responses**:
+  - 200 `{ sent: number }`
+  - 4xx/5xx `{ error: string, message?: string }`
+
+Security notes:
+- The route reads the email provider key server-side (via `store_settings`) and must never serialize or return the secret. Server code should use `getEmailKey()` which decrypts the key server-side.
+- Large recipient lists should be sent via a background queue/batch to avoid request-timeouts and rate limits.
+
+## Sitemap
+
+- The sitemap endpoint at `/sitemap.xml` (implemented in `app/sitemap.ts`) returns an XML `urlset` of absolute URLs built using the `NEXT_PUBLIC_SITE_URL` env var. Each `<url>` entry includes an optional `<lastmod>` ISO timestamp when available.
+- Included items: base site root, published blog posts (`posts` table) at `/blog/:slug`, and published & active products at `/product/:handle`.
+- If upgrading to a Next version that supports a `sitemap()` export, the server implementation can be converted to return an array of objects with `url` and `lastModified` fields instead of raw XML.
   - The DB RPCs `finalize_inventory` and `fail_order` are created `SECURITY DEFINER` and should be owned by the service-role DB user.
   - If the webhook receives an event with an unknown `razorpay_order_id` the handler will acknowledge with `200` to avoid repeated delivery by Razorpay; investigate missing orders separately.
 
@@ -398,6 +419,53 @@ Security & Performance Notes:
 
 - **Error Cases**:
   - 401 `AUTH_REQUIRED` — user must be authenticated (orders.user_id is NOT NULL in this sprint).
+
+  ## Admin Email Broadcast (frontend notes)
+
+  The admin Email Campaign UI (`app/(admin)/email-campaigns`) calls the broadcast endpoint as follows:
+
+  - Endpoint: `POST /api/admin/email/broadcast`
+  - Test payload: `{ subject: string, html: string, test: true }`
+  - Broadcast payload: `{ subject: string, html: string, test: false }`
+  - The frontend uses `fetch('/api/admin/email/broadcast', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })`.
+
+  Notes:
+  - The client should not include any API keys; the server endpoint is responsible for using service credentials.
+  - The blog pages use Next's `generateMetadata()` to populate `title`, `description`, and OpenGraph/Twitter tags. Use `NEXT_PUBLIC_SITE_URL` to build absolute OG image/URLs.
+
+
+## Admin Email Broadcast Endpoint
+
+### POST /api/admin/email/broadcast
+
+- **Purpose**: Send an HTML broadcast email to opted-in users (admin-only).
+- **Auth**: Admin session required. Server uses `getServerSupabase()` and checks `profiles.role === 'admin'`.
+- **Request JSON**:
+
+```json
+{ "subject": "string", "html": "<p>...</p>", "test": true }
+```
+
+- **Behavior**:
+  - If `test: true`, sends a single test email to the admin's email and returns the provider response.
+  - Otherwise, queries `profiles` for `marketing_opt_in = true` and sends the broadcast to those emails.
+  - Uses `EMAIL_API_KEY` stored (encrypted) in `store_settings` and fetched server-side via `getEmailKey()`.
+  - Uses Resend API (`https://api.resend.com/emails`) by default.
+
+- **Responses**:
+  - 200: `{ "sent": <number> }` on success.
+  - 401: unauthenticated.
+  - 403: user is not admin.
+  - 400: invalid payload.
+  - 500: misconfiguration (missing API key).
+
+### Sitemap (app/sitemap.ts)
+
+- **Purpose**: Dynamic XML sitemap generated server-side.
+- **Behavior**: Queries `blog_posts` (where `status = 'published'`) and `products` (where `published = true` and `active = true`) and emits absolute URLs using `NEXT_PUBLIC_SITE_URL`.
+- **Fields**: Each URL entry includes `<loc>` and `<lastmod>` derived from `updated_at`.
+
+-- TODO: Ensure `NEXT_PUBLIC_SITE_URL` is set in environment for absolute URLs.
 
   ## Reviews API Contract
 

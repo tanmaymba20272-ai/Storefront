@@ -23,7 +23,7 @@ describe('FulfillmentCard', () => {
     // @ts-ignore
     global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ awb_code: 'AWB123', courier_name: 'FastEx', label_url: '/label.pdf', fulfillment_status: 'fulfilled' }) })
 
-    render(<FulfillmentCard order={order} />)
+    render(React.createElement(FulfillmentCard, { order }))
 
     const btn = await screen.findByRole('button', { name: /fulfill/i })
     fireEvent.click(btn)

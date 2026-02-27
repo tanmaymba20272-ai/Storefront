@@ -1,12 +1,22 @@
 /**
  * Minimal test stub for products rendering.
- * TODO: Expand with proper Jest/React Testing Library setup.
  */
 import React from 'react'
+import { render, screen } from '@testing-library/react'
 import ProductCard from '../components/ProductCard'
 
+const MOCK_PRODUCT = {
+  id: '1',
+  name: 'Test Shirt',
+  slug: 'test-shirt',
+  price_cents: 1000,
+  currency: 'INR',
+  metadata: { images: [] },
+  category: { id: 'c1', name: 'Tops', slug: 'tops' },
+  drop: null,
+}
+
 test('ProductCard renders basic info', () => {
-  const product = { id: '1', name: 'Test', slug: 'test', price_cents: 1000, image: undefined }
-  // Basic smoke render (no DOM assertions here; placeholder until test harness exists)
-  expect(() => ProductCard({ product })).not.toThrow()
+  render(<ProductCard product={MOCK_PRODUCT as any} />)
+  expect(screen.getByText('Test Shirt')).toBeTruthy()
 })

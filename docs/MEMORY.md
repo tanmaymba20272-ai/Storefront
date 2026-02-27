@@ -2,7 +2,7 @@
 *This file acts as the persistent brain for the agentic team. It MUST be read before any code is written and updated whenever a major architectural decision is made or a sprint is completed.*
 
 ## 1. Active Context
-- **Current Phase:** Sprint 8 complete ✅ — Sprint 9 planning (27 Feb 2026).
+- **Current Phase:** Sprint 9 complete ✅ — Sprint 10 planning (27 Feb 2026).
 - **Project Goal:** Building a highly responsive, modern e-commerce web app for a sustainable fashion brand with full Shopify parity.
 - **Key Mechanics:** The brand relies on a limited-drop model (requiring strict inventory control) and operates out of India (requiring local payment and shipping logistics).
 
@@ -42,6 +42,9 @@
 - **DECISION 33 (UGC Sorting Algorithm — Tiered Weight):** Product reviews are retrieved via `public.get_product_reviews(product_uuid uuid, limit_rows int, offset_rows int)` SECURITY DEFINER RPC. The sort weight is: Tier 1 = rating 5 + has media, Tier 2 = rating 4 + has media, Tier 3 = rating 5 text-only, Tier 4 = everything else. Within each tier: `helpful_count DESC`, then `created_at DESC`. The `CASE` expression must guard against NULL `media_urls` using `COALESCE(array_length(media_urls,1), 0) > 0` — not bare `array_length`. The RPC is called without the `public.` schema prefix in Supabase client `.rpc()` calls.
 - **DECISION 34 (Review Media Bucket — Public Reads, Auth Writes):** The `review-media` Supabase Storage bucket is public-read (no signed URL required for display). Uploads are restricted to authenticated users writing under their own `<user_id>/` path prefix via `storage.objects` RLS policy. The client constructs display URLs as `${NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/review-media/<key>` — raw storage keys must never be used directly as `<img src>` values without this transformation. If the bucket is ever switched to private, server-side signed URL generation must be added and a TODO comment is present in `ReviewCard.tsx`. Client-side upload size limits: 5 MB for images, 20 MB for videos — enforced before upload starts with a user-visible error; Supabase Storage policy enforces the hard cap at 20 MB.
 - **DECISION 35 (Review Modal — Auth + Upload Contract):** `ReviewModal.tsx` is a `"use client"` Framer Motion island. Before uploading, it calls `supabase.auth.getUser()` to obtain the live `user_id` for the storage path (`review-media/<user_id>/<filename>`). Submission calls `lib/actions/reviews.submitReview(...)` as a server action. The modal implements: `role="dialog"`, `aria-modal="true"`, `aria-labelledby`, focus trap (Tab/Shift+Tab cycling), ESC-to-close, and `role="button"` / `aria-label` on the file drop zone. Star buttons carry `aria-label="Rate N out of 5 stars"`.
+- **DECISION 36 (Blog HTML Sanitization — isomorphic-dompurify):** All CMS-generated blog article HTML is sanitized via `isomorphic-dompurify` (`DOMPurify.sanitize(html)`) server-side inside `app/blog/[slug]/page.tsx` before being passed to `dangerouslySetInnerHTML`. This is mandatory — raw database HTML strings must never reach the browser unsanitized. `isomorphic-dompurify` is used (not browser-only `dompurify`) to allow sanitization to run inside a Next.js Server Component. The `blog-media` Supabase Storage bucket (DECISION 14) holds article images uploaded via the Admin CMS.
+- **DECISION 37 (Dynamic Sitemap Strategy):** The sitemap is implemented as `app/sitemap.ts` exporting a default `async function sitemap(): Promise<MetadataRoute.Sitemap>`. It queries Supabase for all published `blog_posts` and active `products`, constructing absolute URLs from the `NEXT_PUBLIC_SITE_URL` env var. Next.js App Router auto-discovers this file and serves it at `/sitemap.xml` — no additional route config is needed. `lastModified` is sourced from each row's `updated_at` timestamp.
+- **DECISION 38 (Email API Key Per-Request Pattern):** `lib/utils/getEmailKey.ts` is a server-only utility that fetches and decrypts `EMAIL_API_KEY` from `store_settings` on every invocation — no module-level caching (mirrors DECISION 30 for Shiprocket). The admin broadcast route `POST /api/admin/email/broadcast` enforces admin access via `getUser()` + `profiles.role === 'admin'` (mirrors DECISION 31). A `"test": true` flag in the request body sends only to the authenticated admin's address, protecting real subscribers during test runs. The `marketing_opt_in boolean DEFAULT true` column on `profiles` (migration `20260301_0015`) is the opt-in filter — only users with `marketing_opt_in = true` are included in live broadcast queries.
 
 ## 3. Known Constraints & Workarounds
 - **Supabase env vars required at runtime:** `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (client); `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server/middleware). The client intentionally does not throw on missing vars during build but will warn at runtime.
@@ -461,3 +464,53 @@ npm run typecheck   # should return 0 errors
 4. Grant RPC execute: `GRANT EXECUTE ON FUNCTION public.get_product_reviews(uuid,int,int) TO authenticated, anon;`
 
 **Open items for Sprint 9:** Account orders page with Leave a Review button, inventory TTL expiry job, Shiprocket delivery webhook, storefront order tracking page, Cypress/Playwright e2e, Shadcn full init.
+
+---
+
+### Sprint 9 — Blog & Admin Email Marketing Engine ✅ (27 Feb 2026)
+
+**Backend:**
+- `app/sitemap.ts` — Dynamic `MetadataRoute.Sitemap` generator; queries Supabase for published `blog_posts` and active `products`; constructs absolute URLs from `NEXT_PUBLIC_SITE_URL`; served automatically at `/sitemap.xml` by Next.js App Router.
+- `lib/utils/getEmailKey.ts` — server-only utility; fetches and decrypts `EMAIL_API_KEY` from `store_settings` via `getServerSupabase()` + `decryptSettings()`; per-request model (no module-level cache).
+- `app/api/admin/email/broadcast/route.ts` — admin-only POST (`getUser()` + `profiles.role === 'admin'`); queries `profiles` where `marketing_opt_in = true`; sends via Resend SDK using the dynamically fetched key; `test: true` mode sends only to the admin's own email.
+- `db/migrations/20260301_0015_profiles_marketing_optin.sql` — adds `marketing_opt_in boolean DEFAULT true` column to `profiles` table.
+- `docs/api_contract.md` — appended broadcast endpoint spec and `marketing_opt_in` field documentation.
+- `db/tests/email/broadcast_admin_only.md`, `db/tests/email/test_mode.md` — manual audit guides.
+
+**Frontend:**
+- `app/blog/page.tsx` — Server Component; `generateMetadata()` for OpenGraph; queries published blog posts; `<Suspense>` boundary.
+- `components/blog/ArticleCard.tsx` — article card (title, excerpt, cover image, publish date) matching "Old Money" design tokens.
+- `app/blog/[slug]/page.tsx` — Server Component; `generateMetadata()` with full OpenGraph + Twitter Card tags; sanitizes raw HTML via `DOMPurify.sanitize()` (isomorphic-dompurify) before `dangerouslySetInnerHTML`.
+- `components/blog/ArticleLayout.tsx` — typography layout for article body (Playfair Display headings, generous reading margins).
+- `components/blog/ProductRecommendations.tsx` — "You may also like" strip sourced from blog post metadata.
+- `app/(admin)/email-campaigns/page.tsx` — Admin email campaigns dashboard.
+- `components/admin/email/EmailCampaignForm.tsx` — `"use client"` form; subject + HTML body; "Send Test" and "Broadcast" buttons; confirmation modal (`role="dialog"`, `aria-modal`); calls broadcast route.
+- `tests/blog/articleRender.test.tsx` — asserts `<script>` tags stripped after sanitization.
+
+**QA (Sprint 9 sweep — 7 fixes across 7 files):**
+
+| File | Fix |
+|------|-----|
+| `app/sitemap.ts` | `NEXT_PUBLIC_SITE_URL` fallback added; `updated_at` null-coalesced to `new Date()` |
+| `app/api/admin/email/broadcast/route.ts` | `err: any` → `unknown` narrowing |
+| `lib/utils/getEmailKey.ts` | Added `server-only` guard import |
+| `db/migrations/20260301_0015_profiles_marketing_optin.sql` | `IF NOT EXISTS` guard on `ALTER TABLE` |
+| `app/blog/[slug]/page.tsx` | `generateMetadata` typed as `Promise<Metadata>`; DOMPurify import verified |
+| `app/(admin)/email-campaigns/page.tsx` | Admin route guard added |
+| `components/admin/email/EmailCampaignForm.tsx` | `err: any` → `unknown`; confirmation modal aria attributes |
+
+**Test Hotfix (Post-Sprint 9 — all 10 test suites passing):**
+- `jest.config.cjs` — `preset: 'ts-jest'`, `testEnvironment: 'jsdom'`, `setupFilesAfterEnv`, ts-jest transform (`jsx: react-jsx`, `diagnostics: false`), `moduleNameMapper` for Next.js + Supabase + CSS/image imports, `transformIgnorePatterns` whitelisting `isomorphic-dompurify`.
+- `jest.setup.ts` — imports `@testing-library/jest-dom`.
+- `__mocks__/next/image.js`, `__mocks__/next/link.js`, `__mocks__/next/navigation.js` — lightweight stubs for jsdom.
+- `__mocks__/lib/supabaseClient.js` — full Supabase client mock (auth, from, rpc).
+- `__mocks__/server-only.js` — stubs `server-only` package.
+- Fixed test files: `tests/cart.test.tsx` (store API); `tests/products.test.tsx` (fixture + render); `tests/cart/cartStore.test.ts` (`act` import, `useHydrated` assertion); `tests/checkout/checkoutFlow.test.ts` (vitest import); `tests/shiprocket/fulfillment.test.ts` (JSX in `.ts`); `tests/auth.test.tsx` (multiple-match on heading).
+
+**Critical manual steps before Sprint 10:**
+1. Apply migration: `psql $DATABASE_URL -f db/migrations/20260301_0015_profiles_marketing_optin.sql`
+2. Store email provider API key encrypted in `store_settings` under key `EMAIL_API_KEY`.
+3. Set `NEXT_PUBLIC_SITE_URL` env var for sitemap absolute URL generation.
+4. `npm install && npm test` — confirm all 10 suites pass.
+
+**Open items for Sprint 10:** `app/account/orders/page.tsx` with Leave a Review entry point (missing since Sprint 8), inventory TTL expiry background job, Shiprocket delivery webhook + storefront order tracking page, Cypress/Playwright e2e tests, Shadcn full init.

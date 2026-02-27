@@ -4,7 +4,7 @@
 
 // TODO: `act` from 'react-dom/test-utils' is deprecated in React 18.
 // Switch to: import { act } from 'react' once React 18 typings are confirmed in this project.
-import { act } from 'react-dom/test-utils'
+import { act } from 'react'
 import { renderHook } from '@testing-library/react'
 import { useCartStore, useHydrated } from '../../store/cartStore'
 
@@ -24,7 +24,7 @@ describe('cart store', () => {
 
   it('useHydrated returns true after mount', () => {
     const { result } = renderHook(() => useHydrated())
-    // hydration happens after effect; initial is false
-    expect(result.current).toBe(false)
+    // RTL flushes effects synchronously inside act(), so hydrated is true post-render
+    expect(result.current).toBe(true)
   })
 })

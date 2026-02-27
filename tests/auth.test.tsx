@@ -16,7 +16,7 @@ describe('Auth UI smoke tests', () => {
 
   it('renders RegisterModal', () => {
     render(<RegisterModal onClose={() => {}} />)
-    expect(screen.getByText(/Create account/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Create account/i })).toBeInTheDocument()
   })
 })
 
