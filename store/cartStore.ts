@@ -1,61 +1,57 @@
 import { create } from 'zustand'
-import { devtools } from 'zustand/middleware'
+import { persist } from 'zustand/middleware'
+import { useEffect, useState } from 'react'
+import type { CartItem } from '../types/cart'
 
-export type CartItem = {
-  productId: string
-  sku?: string
-  quantity: number
-  price_cents: number
-  name: string
-  image?: string
-}
+// Re-export so existing imports from this module continue to work.
+export type { CartItem } from '../types/cart'
 
-type State = {
+type CartState = {
   items: CartItem[]
   isOpen: boolean
   addItem: (item: CartItem) => void
-  removeItem: (productId: string) => void
-  updateQuantity: (productId: string, quantity: number) => void
-  clearCart: () => void
+  removeItem: (sku: string) => void
+  setQuantity: (sku: string, quantity: number) => void
+  clear: () => void
   open: () => void
   close: () => void
+  toggle: () => void
 }
 
-const isClient = typeof window !== 'undefined'
-
-export const useCartStore = create<State>()(
-  devtools((set, get) => ({
-    items: isClient ? JSON.parse(localStorage.getItem('cart.items') || '[]') : [],
-    isOpen: false,
-    addItem: (item) =>
-      set((state) => {
-        const exists = state.items.find((i) => i.productId === item.productId)
-        let items
-        if (exists) {
-          items = state.items.map((i) => (i.productId === item.productId ? { ...i, quantity: i.quantity + item.quantity } : i))
-        } else {
-          items = [...state.items, item]
-        }
-        if (isClient) localStorage.setItem('cart.items', JSON.stringify(items))
-        return { items }
-      }),
-    removeItem: (productId) =>
-      set((state) => {
-        const items = state.items.filter((i) => i.productId !== productId)
-        if (isClient) localStorage.setItem('cart.items', JSON.stringify(items))
-        return { items }
-      }),
-    updateQuantity: (productId, quantity) =>
-      set((state) => {
-        const items = state.items.map((i) => (i.productId === productId ? { ...i, quantity } : i))
-        if (isClient) localStorage.setItem('cart.items', JSON.stringify(items))
-        return { items }
-      }),
-    clearCart: () => {
-      if (isClient) localStorage.removeItem('cart.items')
-      return { items: [] }
-    },
-    open: () => set({ isOpen: true }),
-    close: () => set({ isOpen: false }),
-  }))
+export const useCartStore = create<CartState>()(
+  persist(
+    (set, get) => ({
+      items: [],
+      isOpen: false,
+      addItem: (item: CartItem) =>
+        set((state) => {
+          const exists = state.items.find((i) => i.sku === item.sku)
+          let items
+          if (exists) {
+            items = state.items.map((i) => (i.sku === item.sku ? { ...i, quantity: i.quantity + item.quantity } : i))
+          } else {
+            items = [...state.items, item]
+          }
+          return { items }
+        }),
+      removeItem: (sku: string) =>
+        set((state) => ({ items: state.items.filter((i) => i.sku !== sku) })),
+      setQuantity: (sku: string, quantity: number) =>
+        set((state) => ({ items: state.items.map((i) => (i.sku === sku ? { ...i, quantity } : i)) })),
+      clear: () => set({ items: [] }),
+      open: () => set({ isOpen: true }),
+      close: () => set({ isOpen: false }),
+      toggle: () => set((state) => ({ isOpen: !state.isOpen })),
+    }),
+    { name: 'storefront.cart' }
+  )
 )
+
+// Hydration guard hook to avoid server/client mismatch
+export function useHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
+  return hydrated
+}

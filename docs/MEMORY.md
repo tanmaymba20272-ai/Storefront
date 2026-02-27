@@ -2,7 +2,7 @@
 *This file acts as the persistent brain for the agentic team. It MUST be read before any code is written and updated whenever a major architectural decision is made or a sprint is completed.*
 
 ## 1. Active Context
-- **Current Phase:** Sprint 4 planning (Sprint 3 complete ✅ — 27 Feb 2026).
+- **Current Phase:** Sprint 5 planning (Sprint 4 complete ✅ — 27 Feb 2026).
 - **Project Goal:** Building a highly responsive, modern e-commerce web app for a sustainable fashion brand with full Shopify parity.
 - **Key Mechanics:** The brand relies on a limited-drop model (requiring strict inventory control) and operates out of India (requiring local payment and shipping logistics).
 
@@ -27,6 +27,9 @@
 - **DECISION 18 (Suspense + Skeleton Pattern):** Every data-fetching server component page is wrapped in a React `<Suspense>` boundary. Skeleton loading states mirror the grid/layout structure of the real content (8-card skeleton for `/shop`, split-layout skeleton for `/shop/[slug]`). Skeleton components live in `components/ui/Skeleton.tsx` and composites in `components/shop/ShopGridSkeleton.tsx`. This pattern is mandatory for all future storefront pages.
 - **DECISION 19 (Server / Client Component Boundary Convention):** Data-fetching pages are Server Components only — no `"use client"` at page level. Interactive islands (CategoryFilter, SortDropdown, ProductImageGallery, VariantSelector, AddToCartButton, VariantAndCart) are dedicated Client Components. When both variant selection and cart add must share state, wrap them in a single Client Component island (`VariantAndCart.tsx`) rather than prop-drilling through a server boundary.
 - **DECISION 20 (Dependency Manifest & Type Resolution):** `package.json` is the authoritative manifest for all runtime and dev dependencies. All agent-generated source files must assume the deps they import are declared there. The VS Code TypeScript language server cannot resolve modules without `node_modules` on disk — "Cannot find module" and "JSX IntrinsicElements" errors en masse are a deployment signal, not a code bug. The fix is always `npm install`, never adding inline type stubs. `next-env.d.ts` must be present at the project root (contains `/// <reference types="next" />`) to wire Next.js global types.
+- **DECISION 21 (Validate Cart RPC — Validation-Only Pattern):** Cart stock validation uses a dedicated `public.validate_cart(cart_items jsonb, customer_id uuid) RETURNS jsonb` RPC with `SECURITY DEFINER`. It applies `SELECT … FOR UPDATE` row-level locks on each `products` row to prevent concurrent oversell races. Returns `{ valid: boolean, errors: jsonb, adjusted_items: jsonb }` where `adjusted_items` uses the key `adjusted_quantity` (not `quantity`). The function is **validation-only** — it never decrements inventory. Any stateful reservation must be a separate `hold_cart` RPC. Clients MUST call this RPC server-side via `SUPABASE_SERVICE_ROLE_KEY`; the anon key must never be used for inventory-sensitive operations. Direct client-side `UPDATE` of `products.inventory` or `products.reserved_count` is blocked by RLS policy.
+- **DECISION 22 (Cart Persist + Hydration Guard Pattern):** `store/cartStore.ts` uses Zustand `persist` middleware with `localStorage`. A `useHydrated()` hook (or `isHydrated` flag in the store) gates any SSR-sensitive renders. Cart-related UI that reads persisted state — particularly count badges and drawer content — must check `useHydrated()` before rendering to prevent React hydration mismatches. Store exposes: `items`, `addItem`, `removeItem`, `setQuantity`, `clear`, `isOpen`, `open`, `close`, `toggle`. `CartItem` type is canonical in `types/cart.ts` (not re-declared in the store).
+- **DECISION 23 (Server Action for Cart Validation):** `lib/actions/cart.ts` exports `validateCart(cartItems, customerId?)` as a typed server action using `getServerSupabase()` from `lib/supabaseClient.ts`. The API route `app/api/validate-cart/route.ts` wraps this action for REST clients. Results are typed via `ValidateCartResult` and `ValidateCartError` from `types/cart.ts`. Downstream components (CartDrawer, checkout) must import these types from `types/cart.ts` — never redeclare them inline. The optimistic cart flow is: (1) disable button + show spinner, (2) call `validateCart`, (3a) `valid: true` → `router.push('/checkout')`, (3b) `valid: false` → apply `adjusted_items` to store and surface `errors` inline without navigating.
 
 ## 3. Known Constraints & Workarounds
 - **Supabase env vars required at runtime:** `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (client); `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server/middleware). The client intentionally does not throw on missing vars during build but will warn at runtime.
@@ -241,3 +244,50 @@ npm run typecheck   # should return 0 errors
 ```
 
 **Pattern logged as DECISION 20** — future agents must include `package.json` declarations for every dep they import.
+
+---
+
+### Sprint 4 — Cart Validation, Persistence & Checkout Entry ✅ (27 Feb 2026)
+
+**Backend:**
+- `db/migrations/20260227_0007_validate_cart_rpc.sql` — `public.validate_cart(cart_items jsonb, customer_id uuid)` RPC. Uses `FOR UPDATE` row-level locking on `products` rows; validation-only (no inventory decrement); returns `{ valid, errors, adjusted_items }` jsonb. `SECURITY DEFINER` set; must be owned by the service-role DB user. RLS policies added blocking direct client writes to `products.inventory` / `products.reserved_count`.
+- `db/tests/validate_cart/01_valid_cart.sql` — tests all-in-stock path (`valid: true`).
+- `db/tests/validate_cart/02_partial_shortfall.sql` — tests partial out-of-stock path (`valid: false`, adjusted quantities).
+- `db/tests/validate_cart/03_concurrent_simulation.md` — psql two-session guide demonstrating `FOR UPDATE` prevents double-validation races.
+- `db/tests/validate_cart/README.md` — local psql run instructions.
+- `docs/api_contract.md` — appended `Validate Cart RPC` section (signature, request/response examples, recommended client flow) and `Frontend cart flow` section.
+
+**Frontend:**
+- `types/cart.ts` — new canonical types: `CartItem`, `ValidateCartError` (fields: `sku`, `requested`, `available`, `error` matching actual RPC output), `ValidateCartResult`.
+- `store/cartStore.ts` — upgraded to Zustand `persist` + `useHydrated()` guard; added `isOpen`, `open`, `close`, `toggle`; removed local `CartItem` redeclaration (now imports from `types/cart.ts`).
+- `lib/actions/cart.ts` — server action `validateCart()` calling `public.validate_cart` RPC via `getServerSupabase()`; typed `ValidateCartResult` return.
+- `app/api/validate-cart/route.ts` — REST wrapper for `validateCart` server action.
+- `components/cart/CartDrawer.tsx` — full optimistic validation flow: spinner on submit → `validateCart` → navigate on success or apply adjusted items + show typed errors on failure. Focus-trapped, `aria-hidden` toggled, `aria-label` on all remove buttons.
+- `components/Navbar.tsx` — cart button with `useHydrated()`-gated badge (sum of item quantities), `aria-label` for AT, calls `store.toggle()`; mounts `CartDrawer`.
+- `app/checkout/page.tsx` — checkout entry page; reads persisted cart from store; shows cart summary and validation errors if present.
+- `tests/cart/cartStore.test.ts`, `tests/cart/wiring.test.ts` — unit test stubs.
+
+**QA (17 issues fixed across 8 files):**
+
+| # | File | Fix |
+|---|------|-----|
+| 1 | `lib/actions/cart.ts` | Wrong import path `'../types/cart'` → `'../../types/cart'` |
+| 2–3 | `types/cart.ts` | `adjusted_items` key corrected to `adjusted_quantity`; `ValidateCartError` union added matching actual RPC output |
+| 4 | `types/cart.ts` | `metadata?: any` → `Record<string, unknown>` |
+| 5 | `store/cartStore.ts` | Removed divergent local `CartItem`; imports from `types/cart` |
+| 6–7 | `components/cart/CartDrawer.tsx` | `ai.quantity` → `ai.adjusted_quantity`; typed error formatter using `ValidateCartError` |
+| 8–9 | `components/cart/CartDrawer.tsx` | `aria-modal` always `true` + `aria-hidden={!isOpen}`; `aria-label` on remove buttons |
+| 10–11 | `components/cart/CartDrawer.tsx` | `err: any` → `err: unknown`; `metadata?.name` cast to `string \| undefined` |
+| 12–14 | `components/Navbar.tsx` | `open()` → `toggle()`; `useHydrated()` guard on badge; AT aria-label on badge |
+| 15 | `app/api/validate-cart/route.ts` | `err: any` → `err: unknown` |
+| 16 | `app/checkout/page.tsx` | `metadata?.name` cast to `string \| undefined` |
+| 17 | `tests/cart/cartStore.test.ts` | Added TODO re deprecated React 18 `act` import |
+
+**Critical manual steps before Sprint 5:**
+1. `npm install` then `npx tsc --noEmit` — should return 0 errors.
+2. Verify `lib/supabaseClient.ts` `getServerSupabase()` uses `SUPABASE_SERVICE_ROLE_KEY` (not anon key).
+3. Apply migration: `psql $DATABASE_URL -f db/migrations/20260227_0007_validate_cart_rpc.sql` — add `DROP POLICY IF EXISTS` guards if running against an existing schema.
+4. Confirm `products` table has `sku` (unique), `inventory`, and optionally `reserved_count` columns before migration runs.
+5. Run cart SQL tests: `psql $DATABASE_URL -f db/tests/validate_cart/01_valid_cart.sql && psql $DATABASE_URL -f db/tests/validate_cart/02_partial_shortfall.sql`.
+
+**Open items for Sprint 5:** Razorpay checkout integration, `hold_cart` RPC for reservations, order creation flow, admin CRUD forms (wire Zod schemas), Cypress/Playwright e2e, Shadcn full init, storage bucket creation, profiles trigger `supabase db push`.

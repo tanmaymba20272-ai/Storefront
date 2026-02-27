@@ -1,3 +1,87 @@
+# API Contract & Frontend Cart Flow
+
+## Frontend cart flow
+
+- Cart is stored in a persisted `zustand` store (`store/cartStore.ts`) and guarded by `useHydrated()` to avoid SSR hydration mismatch.
+- When user clicks **Proceed to checkout** the UI performs an optimistic validation:
+  1. Disable the checkout button and show a loading state.
+ 2. POST current cart items to `/api/validate-cart` which calls the Supabase RPC `validate_cart` on the server.
+ 3. RPC returns `{ valid: boolean; errors: any[]; adjusted_items: any[] }`.
+ 4. If `valid` → navigate to `/checkout`.
+ 5. If `invalid` → apply `adjusted_items` locally (update quantities or remove items) and show error banners.
+
+- The Cart Drawer is now mounted from the site header and will navigate to `/checkout` after successful validation.
+
+### Example client call
+
+```ts
+await fetch('/api/validate-cart', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ items: cartItems, customerId }),
+})
+```
+
+### Notes
+- The server wrapper `lib/actions/cart.ts` uses `getServerSupabase()` and calls the `validate_cart` RPC. Ensure `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set in the server environment.
+- The frontend expects `adjusted_items` to be an array of `{ sku, quantity }` and `errors` to include `{ sku, message }`.
+# API Contract
+
+## Validate Cart RPC
+
+RPC signature:
+
+```
+public.validate_cart(cart_items jsonb, customer_id uuid DEFAULT NULL) RETURNS jsonb
+```
+
+Request payload (example):
+
+```json
+[ { "sku": "SKU-A", "quantity": 2 }, { "sku": "SKU-B", "quantity": 1 } ]
+```
+
+Example SQL call:
+
+```sql
+SELECT public.validate_cart('[{"sku":"SKU-A","quantity":2}]'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid);
+```
+
+Example response (valid):
+
+```json
+{
+  "valid": true,
+  "errors": [],
+  "adjusted_items": [ { "sku": "SKU-A", "adjusted_quantity": 2 } ]
+}
+```
+
+Example response (shortfall):
+
+```json
+{
+  "valid": false,
+  "errors": [ { "sku": "SKU-B", "requested": 5, "available": 2 } ],
+  "adjusted_items": [ { "sku": "SKU-B", "adjusted_quantity": 2 } ]
+}
+```
+
+Recommended client flow:
+
+- **Validate**: Client calls `validate_cart` to check availability and receive `adjusted_items`.
+- **(Optional) Hold**: Call a separate `rpc.hold_cart` (not implemented here) to create
+  a short-lived reservation (server-managed `reserved_count`) for the validated items.
+- **Checkout**: Complete payment and finalize inventory updates on the server.
+
+Notes:
+- The `validate_cart` RPC is validation-only and does not change inventory. To avoid
+  oversell in high-concurrency drops, use a two-step pattern: `validate_cart` -> `hold_cart` -> `checkout`.
+- `hold_cart` should be a SECURITY DEFINER RPC owned by the service role that increments
+  `reserved_count` within a transaction and sets an expiry (e.g. `hold_ttl_seconds`).
+- Ensure that `validate_cart` and any inventory-modifying RPCs are called from server-side
+  code running with the appropriate service credentials. Do not grant public clients
+  permission to update `products.inventory` or `products.reserved_count` directly.
 # API Contract — TypeScript Interfaces
 
 /*
