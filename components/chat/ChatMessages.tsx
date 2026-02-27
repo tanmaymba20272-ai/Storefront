@@ -20,7 +20,7 @@ export default function ChatMessages({ messages }: { messages: ChatMessage[] }) 
         <div key={m.id} className={`mb-2 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
           <div
             className={`max-w-[80%] whitespace-pre-wrap rounded-md px-3 py-2 ${
-              m.role === 'user' ? 'bg-[#041526] text-[#F8F4EC]' : 'bg-white text-[#041526]'
+              m.role === 'user' ? 'bg-navy text-cream' : 'bg-white text-navy'
             }`}
           >
             {m.role === 'bot' ? (

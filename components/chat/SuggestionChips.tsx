@@ -12,7 +12,7 @@ export default function SuggestionChips({ onSelect }: { onSelect: (s: string) =>
           key={s}
           type="button"
           onClick={() => onSelect(s)}
-          className="rounded-full border px-3 py-1 text-sm text-[#041526]"
+          className="rounded-full border px-3 py-1 text-sm text-navy"
         >
           {s}
         </button>

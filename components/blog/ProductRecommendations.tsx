@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default async function ProductRecommendations({ postId }: { postId: number }) {
+export default async function ProductRecommendations({ postId }: { postId: string }) {
   // Placeholder server component: in future implement recommendation logic
   return (
     <aside className="mt-8 p-4 border rounded bg-white/60">

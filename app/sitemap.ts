@@ -1,4 +1,4 @@
-import { getServerSupabase } from 'lib/supabase/getServerSupabase';
+import { getServerSupabase } from '../lib/supabaseClient';
 import type { NextRequest } from 'next/server';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || '';
@@ -8,7 +8,7 @@ export async function GET(_req: NextRequest) {
     return new Response('NEXT_PUBLIC_SITE_URL is not set', { status: 500 });
   }
 
-  const { supabase } = getServerSupabase();
+  const supabase = getServerSupabase();
 
   // Fetch published blog posts (table: posts)
   const { data: posts } = await supabase
@@ -28,14 +28,14 @@ export async function GET(_req: NextRequest) {
   if (posts && Array.isArray(posts)) {
     for (const p of posts) {
       if (!p?.slug) continue;
-      urls.push({ loc: `${SITE_URL}/blog/${p.slug}`, lastmod: p.updated_at });
+      urls.push({ loc: `${SITE_URL}/blog/${p.slug}`, lastmod: p.updated_at ?? undefined });
     }
   }
 
   if (products && Array.isArray(products)) {
     for (const p of products) {
       if (!p?.handle) continue;
-      urls.push({ loc: `${SITE_URL}/product/${p.handle}`, lastmod: p.updated_at });
+      urls.push({ loc: `${SITE_URL}/product/${p.handle}`, lastmod: p.updated_at ?? undefined });
     }
   }
 

@@ -24,5 +24,5 @@ module.exports = {
     '^store/(.*)$': '<rootDir>/store/$1',
   },
   transformIgnorePatterns: ['/node_modules/(?!(isomorphic-dompurify|dompurify)/)'],
-  testPathIgnorePatterns: ['/node_modules/', '/.next/'],
+  testPathIgnorePatterns: ['/node_modules/', '/.next/', '<rootDir>/tests/e2e/'],
 }

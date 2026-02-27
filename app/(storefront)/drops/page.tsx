@@ -1,5 +1,5 @@
 import React from 'react'
-import getServerSupabase from '../../../lib/supabaseClient'
+import { getServerSupabase } from '../../../lib/supabaseClient'
 import DropCountdown from '../../../components/DropCountdown'
 
 type ActiveDrop = {
@@ -10,7 +10,7 @@ type ActiveDrop = {
 }
 
 export default async function DropsPage() {
-  const supabase = getServerSupabase
+  const supabase = getServerSupabase()
   const { data: drops } = await supabase.from('drops').select('*').eq('active', true) as unknown as { data: ActiveDrop[] | null }
 
   return (
@@ -24,7 +24,7 @@ export default async function DropsPage() {
                 <div className="font-medium">{d.name}</div>
                 <div className="text-sm text-gray-600">{d.description}</div>
               </div>
-              <DropCountdown endsAt={d.ends_at} />
+              <DropCountdown endsAt={d.ends_at ?? ''} />
             </div>
           ))
         ) : (

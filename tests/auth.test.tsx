@@ -1,11 +1,4 @@
-/// <reference types="@testing-library/jest-dom" />
-// TODO: Configure Jest test runner before enabling these tests.
-// Run: npm install --save-dev jest jest-environment-jsdom @testing-library/react @testing-library/jest-dom @types/jest
-// Then add jest.config.ts and a jest.setup.ts that imports @testing-library/jest-dom.
-// See docs/frontend_readme.md for details.
-
 import React from 'react'
-import '@testing-library/jest-dom'
 import { render, screen } from '@testing-library/react'
 import LoginModal from '../components/auth/LoginModal'
 import RegisterModal from '../components/auth/RegisterModal'
@@ -21,5 +14,3 @@ describe('Auth UI smoke tests', () => {
     expect(screen.getByRole('heading', { name: /Create account/i })).toBeTruthy()
   })
 })
-
-// TODO: add deeper tests with mocked Supabase client and navigation

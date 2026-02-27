@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   let webhookSecret: string | undefined;
   try {
     const keys = await getRazorpayKeys();
-    webhookSecret = keys?.webhookSecret || keys?.RAZORPAY_WEBHOOK_SECRET || keys?.razorpay_webhook_secret;
+    webhookSecret = keys?.webhookSecret;
   } catch (err: unknown) {
     return new NextResponse(JSON.stringify({ error: 'unable_to_retrieve_webhook_secret' }), { status: 500 });
   }

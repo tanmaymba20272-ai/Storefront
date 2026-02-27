@@ -1,35 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
-import type {
-  Profile,
-  Category,
-  Drop,
-  Product,
-  BlogPost,
-  Review,
-  StoreSetting,
-  Order,
-} from '../types/api'
+import type { Database } from '../types/api'
 
-// ---------------------------------------------------------------------------
-// Database type — single source of truth for all Supabase client generics
-// ---------------------------------------------------------------------------
-export type Database = {
-  public: {
-    Tables: {
-      profiles: { Row: Profile }
-      categories: { Row: Category }
-      drops: { Row: Drop }
-      products: { Row: Product }
-      blog_posts: { Row: BlogPost }
-      reviews: { Row: Review }
-      store_settings: { Row: StoreSetting }
-      orders: { Row: Order }
-    }
-    Views: Record<string, never>
-    Functions: Record<string, never>
-    Enums: Record<string, never>
-  }
-}
+// Re-export so callers can import Database from either location.
+export type { Database } from '../types/api'
 
 // ---------------------------------------------------------------------------
 // Browser / client-side Supabase client (anon key, NEXT_PUBLIC_* vars)

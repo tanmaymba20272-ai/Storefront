@@ -1,6 +1,10 @@
 export type CartItem = {
-  sku: string
+  productId?: string
+  name?: string
+  price_cents?: number
+  sku?: string
   quantity: number
+  image?: string | null
   metadata?: Record<string, unknown>
 }
 

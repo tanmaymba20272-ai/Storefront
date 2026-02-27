@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getServerSupabase } from '../../../../lib/supabase';
+import { getServerSupabase } from 'lib/supabaseClient';
 
 type EligibilityResult = { eligible: boolean };
 
 async function checkEligibility(productId: string, user_id: string): Promise<boolean> {
-  const { supabase } = getServerSupabase();
+  const supabase = getServerSupabase();
 
   // Use a JSONB containment check to find orders that include the product
   // We rely on the Postgres `@>` operator through the Supabase client `.contains()` helper.
@@ -19,13 +19,11 @@ async function checkEligibility(productId: string, user_id: string): Promise<boo
       .contains('items', [{ product_id: productId }]);
 
     if (error) {
-      console.error('Eligibility check DB error', error);
       return false;
     }
 
     return Array.isArray(data) && data.length > 0;
-  } catch (err: unknown) {
-    console.error('Eligibility check unexpected error', err);
+  } catch {
     return false;
   }
 }
@@ -34,7 +32,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const productId = url.searchParams.get('product_id');
 
-  const { supabase } = getServerSupabase();
+  const supabase = getServerSupabase();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData?.user;
 
@@ -57,7 +55,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const productId = body?.product_id;
 
-    const { supabase } = getServerSupabase();
+    const supabase = getServerSupabase();
     const { data: userData } = await supabase.auth.getUser();
     const user = userData?.user;
 

@@ -57,7 +57,7 @@ export default function ProductImageGallery({
             drag="x"
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.15}
-            onDragEnd={(_e: React.PointerEvent, info: DragInfo) => {
+            onDragEnd={(_e: MouseEvent | TouchEvent | PointerEvent, info: DragInfo) => {
               if (info.offset.x < -60) next()
               if (info.offset.x > 60) prev()
             }}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Metadata } from 'next';
-import { getServerSupabase } from 'lib/supabase/getServerSupabase';
+import { notFound } from 'next/navigation';
+import { getServerSupabase } from '../../../lib/supabaseClient';
 // server-side DOM sanitization. Ensure `isomorphic-dompurify` is installed for server builds.
 // TODO: add `isomorphic-dompurify` to package.json if not present.
 import DOMPurify from 'isomorphic-dompurify';
@@ -9,7 +10,7 @@ import ProductRecommendations from '../../../components/blog/ProductRecommendati
 
 export async function generateMetadata({ params }: any): Promise<Metadata> {
   const { slug } = params;
-  const { supabase } = await getServerSupabase();
+  const supabase = getServerSupabase();
   const { data } = await supabase.from('posts').select('title, excerpt, cover_image').eq('slug', slug).single();
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || '';
@@ -37,7 +38,7 @@ export async function generateMetadata({ params }: any): Promise<Metadata> {
 
 export default async function ArticlePage({ params }: any) {
   const { slug } = params;
-  const { supabase } = await getServerSupabase();
+  const supabase = getServerSupabase();
 
   const { data: post, error } = await supabase
     .from('posts')
@@ -47,11 +48,11 @@ export default async function ArticlePage({ params }: any) {
     .single();
 
   if (error || !post) {
-    return new Response('Not Found', { status: 404 });
+    notFound();
   }
 
   // Sanitize server-side. TODO: Prefer storing sanitized MDX in DB in future.
-  const clean = DOMPurify.sanitize(post.content || '');
+  const clean = DOMPurify.sanitize((post.content as unknown as string) || '');
 
   return (
     <ArticleLayout post={post}>

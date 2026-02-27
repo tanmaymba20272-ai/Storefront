@@ -7,7 +7,12 @@ const DEFAULT_PRODUCT_IMAGE = process.env.DEFAULT_PRODUCT_IMAGE ?? ''
 const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? 'product-images'
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set on the server')
+  // Non-fatal at module load to avoid build crashes in environments
+  // where server-only secrets are not present (e.g., static checks/CI).
+  // Functions that require the admin client will still fail at runtime
+  // with clear errors when used without proper env vars.
+  // eslint-disable-next-line no-console
+  console.warn('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set; supabaseAdmin may be non-functional at runtime')
 }
 
 const supabaseAdmin: SupabaseClient<Database> = createClient<Database>(
@@ -83,8 +88,8 @@ async function resolveImageUrls(images: string[] | null | undefined) : Promise<s
         .from(bucket)
         .createSignedUrl(path, 60 * 15)
 
-      if (error || !data?.signedURL) return DEFAULT_PRODUCT_IMAGE
-      return data.signedURL
+      if (error || !data?.signedUrl) return DEFAULT_PRODUCT_IMAGE
+      return data.signedUrl
     } catch (e) {
       return DEFAULT_PRODUCT_IMAGE
     }
@@ -144,7 +149,7 @@ export async function getPublishedProducts(opts?: {
     .select(
       `id, name, slug, price_cents, currency, metadata, category:categories(id,name,slug), drop:drops(id,name,start_at,end_at,status)`
     )
-    .eq('status', 'published')
+    .eq('status', 'active')
 
   if (categoryId) query = query.eq('category_id', categoryId)
 
@@ -163,12 +168,12 @@ export async function getPublishedProducts(opts?: {
   else if (opts?.sort === 'price_desc') query = query.order('price_cents', { ascending: false })
   else query = query.order('created_at', { ascending: false })
 
-  query = query.limit(limit).offset(offset)
+  query = query.range(offset, offset + limit - 1)
 
   const { data, error } = await query
   if (error) throw error
 
-  const rows = (data ?? []) as ProductRow[]
+  const rows = (data ?? []) as unknown as ProductRow[]
 
   // Resolve image URLs server-side and map to the public shape
   const results: ProductListItem[] = await Promise.all(rows.map(async (r) => {
@@ -237,7 +242,7 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | nu
   const mappedVariants: Variant[] = (variants ?? []).map((v: VariantRow) => ({
     id: v.id,
     sku: v.sku,
-    title: v.title,
+    title: v.title ?? undefined,
     price_cents: v.price_cents,
     currency: v.currency,
     metadata: v.metadata ?? undefined,
@@ -246,12 +251,12 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | nu
   const detail: ProductDetail = {
     id: data.id,
     name: data.name,
-    slug: data.slug,
+    slug: data.slug ?? '',
     price_cents: data.price_cents,
     currency: data.currency,
     metadata: { ...(data.metadata ?? {}), images },
-    category: data.category ?? null,
-    drop: data.drop ?? null,
+    category: (data.category as unknown) as CategoryListItem | null,
+    drop: (data.drop as unknown) as DropListItem | null,
     description: data.description ?? null,
     inventory_count: data.inventory_count ?? null,
     variants: mappedVariants,

@@ -65,14 +65,11 @@ async function getRawKeyBytes(): Promise<Uint8Array> {
 
 export async function encryptSettings(value: string): Promise<string> {
   const raw = await getRawKeyBytes();
-  const iv = (typeof crypto !== 'undefined' && 'getRandomValues' in crypto)
-    ? crypto.getRandomValues(new Uint8Array(12))
-    : require('crypto').randomBytes(12);
-
-  // Prefer WebCrypto if available
+  // Prefer WebCrypto if available (Edge / modern Node)
   if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
     const subtle: SubtleCrypto = globalThis.crypto.subtle;
-    const key = await subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+    const key = await subtle.importKey('raw', raw as unknown as Uint8Array<ArrayBuffer>, 'AES-GCM', false, ['encrypt']);
     const enc = new TextEncoder().encode(value);
     const cipherBuffer = await subtle.encrypt({ name: 'AES-GCM', iv }, key, enc);
     const combined = new Uint8Array(iv.length + cipherBuffer.byteLength);
@@ -82,8 +79,9 @@ export async function encryptSettings(value: string): Promise<string> {
   }
 
   // Node fallback
-  const crypto = require('crypto');
-  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(raw), Buffer.from(iv));
+  const nodeCrypto = require('crypto') as typeof import('crypto');
+  const iv = nodeCrypto.randomBytes(12);
+  const cipher = nodeCrypto.createCipheriv('aes-256-gcm', Buffer.from(raw), Buffer.from(iv));
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   const out = Buffer.concat([Buffer.from(iv), ciphertext, tag]);
@@ -99,18 +97,18 @@ export async function decryptSettings(ciphertextB64: string): Promise<string> {
 
   if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
     const subtle: SubtleCrypto = globalThis.crypto.subtle;
-    const key = await subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+    const key = await subtle.importKey('raw', raw as unknown as Uint8Array<ArrayBuffer>, 'AES-GCM', false, ['decrypt']);
     // body contains ciphertext + tag (WebCrypto style)
     const plain = await subtle.decrypt({ name: 'AES-GCM', iv }, key, body);
     return new TextDecoder().decode(plain);
   }
 
   // Node fallback: last 16 bytes are auth tag
-  const crypto = require('crypto');
+  const nodeCrypto = require('crypto') as typeof import('crypto');
   if (body.length < 16) throw new Error('Invalid ciphertext (too short for auth tag)');
   const tag = body.slice(body.length - 16);
   const ciphertext = body.slice(0, body.length - 16);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(raw), Buffer.from(iv));
+  const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', Buffer.from(raw), Buffer.from(iv));
   decipher.setAuthTag(Buffer.from(tag));
   const decrypted = Buffer.concat([decipher.update(Buffer.from(ciphertext)), decipher.final()]);
   return decrypted.toString('utf8');

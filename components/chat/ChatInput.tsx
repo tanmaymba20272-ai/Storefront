@@ -60,10 +60,8 @@ export default function ChatInput({ onSubmit, supabase, onRequestLogin }: Props)
         setText('')
       }
       setMode(undefined)
-    } catch (err: unknown) {
+    } catch {
       // onSubmit error is handled by the parent (ChatWidget streams the error into the message list)
-      // eslint-disable-next-line no-console
-      console.error('[ChatInput] submit error:', err instanceof Error ? err.message : String(err))
     } finally {
       setSubmitting(false)
     }

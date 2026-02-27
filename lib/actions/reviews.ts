@@ -1,4 +1,4 @@
-import { getServerSupabase } from '../supabase';
+import { getServerSupabase } from 'lib/supabaseClient';
 
 type SubmitArgs = {
   product_id: string;
@@ -10,7 +10,7 @@ type SubmitArgs = {
 type SubmitResult = { success: boolean; review_id?: string; error?: string };
 
 async function userPurchased(productId: string, user_id: string): Promise<boolean> {
-  const { supabase } = getServerSupabase();
+  const supabase = getServerSupabase();
   try {
     const { data, error } = await supabase
       .from('orders')
@@ -20,20 +20,18 @@ async function userPurchased(productId: string, user_id: string): Promise<boolea
       .contains('items', [{ product_id: productId }]);
 
     if (error) {
-      console.error('userPurchased DB error', error);
       return false;
     }
 
     return Array.isArray(data) && data.length > 0;
-  } catch (err: unknown) {
-    console.error('userPurchased unexpected error', err);
+  } catch {
     return false;
   }
 }
 
 export async function submitReview(args: SubmitArgs): Promise<SubmitResult> {
   const { product_id, rating, body = null, media_urls = null } = args;
-  const { supabase } = getServerSupabase();
+  const supabase = getServerSupabase();
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   const user = userData?.user;

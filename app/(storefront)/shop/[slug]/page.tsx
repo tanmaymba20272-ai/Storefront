@@ -136,8 +136,7 @@ async function ProductReviews({ productId }: { productId: string }) {
         <ReviewsList reviews={reviews} />
       </Suspense>
     )
-  } catch (err) {
-    console.error('reviews fetch error', err)
+  } catch (_err) {
     return <div className="mt-6 text-sm text-stone-500">Unable to load reviews</div>
   }
 }

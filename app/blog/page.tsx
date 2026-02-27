@@ -1,6 +1,6 @@
 import { Metadata } from 'next';
 import ArticleCard from '../../components/blog/ArticleCard';
-import { getServerSupabase } from 'lib/supabase/getServerSupabase';
+import { getServerSupabase } from 'lib/supabaseClient';
 
 export const revalidate = 60;
 
@@ -19,7 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function BlogIndex() {
-  const { supabase } = await getServerSupabase();
+  const supabase = getServerSupabase();
 
   const { data: posts, error } = await supabase
     .from('posts')
@@ -28,7 +28,6 @@ export default async function BlogIndex() {
     .order('published_at', { ascending: false });
 
   if (error) {
-    console.error('Failed to load blog posts', error);
     return <div className="p-6">Unable to load posts.</div>;
   }
 

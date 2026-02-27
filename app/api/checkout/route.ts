@@ -21,8 +21,7 @@ export async function POST(req: Request) {
     const supabase = getServerSupabase()
 
     // Get current user (server-side). Require authenticated user for now.
-    const userRes = await supabase.auth.getUser()
-    const user = (userRes as any)?.data?.user ?? null
+    const { data: { user } } = await supabase.auth.getUser()
     if (!user || !user.id) {
       return NextResponse.json({ error: 'AUTH_REQUIRED' }, { status: 401 })
     }
@@ -36,8 +35,11 @@ export async function POST(req: Request) {
     }
 
     // rpcRes.data may be returned as a raw object or an array depending on driver
-    let rpcData: any = rpcRes.data
-    if (Array.isArray(rpcData) && rpcData.length > 0) rpcData = rpcData[0]
+    type ReserveResult = { success: boolean; error?: string; sku?: string }
+    let rpcData: ReserveResult | null = null
+    const rawRpc = rpcRes.data as ReserveResult | ReserveResult[] | null
+    if (Array.isArray(rawRpc) && rawRpc.length > 0) rpcData = rawRpc[0]
+    else if (rawRpc && !Array.isArray(rawRpc)) rpcData = rawRpc
     if (rpcData && rpcData.success === false) {
       if (rpcData.error === 'INVENTORY_EXHAUSTED') {
         return NextResponse.json({ error: 'INVENTORY_EXHAUSTED', sku: rpcData.sku }, { status: 409 })
@@ -54,13 +56,12 @@ export async function POST(req: Request) {
 
     if (prodErr || !products) {
       // Cleanup reservation
-      await supabase.rpc('release_reservation', { p_order_id: orderId }).catch(() => null)
+      try { await supabase.rpc('release_reservation', { p_order_id: orderId }) } catch { /* ignore */ }
       return NextResponse.json({ error: 'PRODUCT_LOOKUP_FAILED' }, { status: 500 })
     }
 
     const priceMap = new Map<string, { id: string; price_cents: number; currency: string }>()
-    // @ts-ignore
-    for (const p of products) {
+    for (const p of (products as Array<{ id: string; sku: string; price_cents: number; currency: string }>)) {
       priceMap.set(p.sku, { id: p.id, price_cents: p.price_cents, currency: p.currency })
     }
 
@@ -69,7 +70,7 @@ export async function POST(req: Request) {
     for (const item of cart_items) {
       const entry = priceMap.get(item.sku)
       if (!entry) {
-        await supabase.rpc('release_reservation', { p_order_id: orderId }).catch(() => null)
+        try { await supabase.rpc('release_reservation', { p_order_id: orderId }) } catch { /* ignore */ }
         return NextResponse.json({ error: 'SKU_NOT_FOUND', sku: item.sku }, { status: 400 })
       }
       amount_paise += Number(entry.price_cents) * Number(item.quantity)
@@ -77,9 +78,14 @@ export async function POST(req: Request) {
     }
 
     // Create Razorpay order
-    let razorpayOrder: any = null
+    type RazorpayOrderResult = { id: string; amount: number; currency: string; receipt?: string | null }
+    let razorpayOrder: RazorpayOrderResult | null = null
     try {
       const { keyId, keySecret } = await getRazorpayKeys()
+      if (!keyId || !keySecret) {
+        try { await supabase.rpc('release_reservation', { p_order_id: orderId }) } catch { /* ignore */ }
+        return NextResponse.json({ error: 'RAZORPAY_CONFIG_MISSING' }, { status: 500 })
+      }
       const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret })
 
       razorpayOrder = await razorpay.orders.create({
@@ -108,7 +114,7 @@ export async function POST(req: Request) {
 
       if (insertErr) {
         // If DB insert failed, roll back reservation
-        await supabase.rpc('release_reservation', { p_order_id: orderId }).catch(() => null)
+        try { await supabase.rpc('release_reservation', { p_order_id: orderId }) } catch { /* ignore */ }
         return NextResponse.json({ error: 'ORDER_INSERT_FAILED' }, { status: 500 })
       }
 
@@ -123,7 +129,7 @@ export async function POST(req: Request) {
       )
     } catch (err: unknown) {
       // Cleanup reservation
-      await supabase.rpc('release_reservation', { p_order_id: orderId }).catch(() => null)
+      try { await supabase.rpc('release_reservation', { p_order_id: orderId }) } catch { /* ignore */ }
       return NextResponse.json({ error: 'RAZORPAY_ORDER_FAILED' }, { status: 502 })
     }
   } catch (err: unknown) {

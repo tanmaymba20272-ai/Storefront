@@ -1,4 +1,4 @@
-import { getServerSupabase } from 'lib/supabase-server';
+import { getServerSupabase } from 'lib/supabaseClient';
 import getEmailKey from 'lib/utils/getEmailKey';
 
 type BroadcastPayload = {
@@ -8,7 +8,7 @@ type BroadcastPayload = {
 };
 
 export async function POST(req: Request) {
-  const { supabase } = getServerSupabase();
+  const supabase = getServerSupabase();
 
   // Auth check
   const userRes = await supabase.auth.getUser();
@@ -48,12 +48,16 @@ export async function POST(req: Request) {
   // try marketing_opt_in true first
   const r1 = await supabase.from('profiles').select('email').eq('marketing_opt_in', true);
   if (!r1.error && Array.isArray(r1.data) && r1.data.length > 0) {
-    recipients = r1.data.filter((r: any) => r?.email).map((r: any) => ({ email: r.email }));
+    recipients = (r1.data as { email: string | null }[])
+      .filter((r) => r?.email)
+      .map((r) => ({ email: r.email as string }))
   } else {
     // fallback: all profiles with non-null email
     const r2 = await supabase.from('profiles').select('email').not('email', 'is', null);
     if (!r2.error && Array.isArray(r2.data)) {
-      recipients = r2.data.filter((r: any) => r?.email).map((r: any) => ({ email: r.email }));
+      recipients = (r2.data as { email: string | null }[])
+        .filter((r) => r?.email)
+        .map((r) => ({ email: r.email as string }))
     }
   }
 
@@ -107,13 +111,9 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: body }), { status: sendRes.status, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Resend returns send details. We don't expose the API key.
     return new Response(JSON.stringify({ sent: emails.length }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return new Response(JSON.stringify({ error: msg }), { status: 502, headers: { 'Content-Type': 'application/json' } });
   }
 }
-
-// TODO: Ensure this route runs in a secure runtime (Edge preferred) and never exposes the EMAIL_API_KEY.
-// TODO: Consider batching / rate-limiting and queued background sends for large recipient lists.

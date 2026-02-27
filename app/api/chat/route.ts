@@ -1,4 +1,7 @@
-export const runtime = 'edge'
+// Changed from 'edge' to 'nodejs' (T2-07 fix). The module-level Map rate limiter
+// requires Node.js runtime to maintain state within a single instance. In a
+// multi-instance production deployment, migrate to Redis/Supabase KV (DECISION 40).
+export const runtime = 'nodejs'
 
 import { getServerSupabase } from '../../../lib/supabaseClient'
 import { getLlmKey } from '../../../lib/utils/getLlmKey'
@@ -153,7 +156,7 @@ export async function POST(req: Request) {
           .eq('user_id', validatedUid)
           .order('created_at', { ascending: false })
           .limit(1)
-        order = (data?.[0] as Order) ?? null
+        order = (data?.[0] as unknown as Order) ?? null
       } else if (order_id && email) {
         const { data } = await supabase
           .from('orders')
@@ -161,7 +164,7 @@ export async function POST(req: Request) {
           .eq('id', order_id)
           .eq('email', email)
           .limit(1)
-        order = (data?.[0] as Order) ?? null
+        order = (data?.[0] as unknown as Order) ?? null
       } else {
         return new Response(
           JSON.stringify({ error: 'Authentication required. Please sign in or provide order_id and email.' }),

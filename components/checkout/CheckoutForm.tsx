@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { ShippingSchema, ShippingFormData } from '../../lib/validations/checkout'
 import type { CartItem } from '../../types/cart'
-import useCart from '../../store/cartStore'
+import { useCartStore as useCart } from '../../store/cartStore'
 import { useRouter } from 'next/navigation'
 
 export default function CheckoutForm() {

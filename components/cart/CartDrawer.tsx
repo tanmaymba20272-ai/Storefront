@@ -125,21 +125,21 @@ export default function CartDrawer() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setQuantity(it.sku, Math.max(0, it.quantity - 1))}
+                    onClick={() => it.sku && setQuantity(it.sku, Math.max(0, it.quantity - 1))}
                     aria-label={`Decrease quantity for ${it.sku}`}
                     className="px-2 py-1 border"
                   >
                     -
                   </button>
                   <button
-                    onClick={() => setQuantity(it.sku, it.quantity + 1)}
+                    onClick={() => it.sku && setQuantity(it.sku, it.quantity + 1)}
                     aria-label={`Increase quantity for ${it.sku}`}
                     className="px-2 py-1 border"
                   >
                     +
                   </button>
                   <button
-                    onClick={() => removeItem(it.sku)}
+                    onClick={() => it.sku && removeItem(it.sku)}
                     aria-label={`Remove ${(it.metadata?.name as string | undefined) ?? it.sku} from cart`}
                     className="text-sm text-red-600"
                   >
