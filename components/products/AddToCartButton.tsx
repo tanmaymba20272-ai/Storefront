@@ -1,23 +1,43 @@
-"use client"
+'use client'
+
 import React from 'react'
 import { useCartStore } from '../../store/cartStore'
+import type { Variant } from '../../lib/actions/catalog'
 
-export default function AddToCartButton({ product }: { product: any }) {
+interface AddToCartButtonProps {
+  productId: string
+  name: string
+  priceCents: number
+  image?: string
+  selectedVariant?: Variant | null
+}
+
+export default function AddToCartButton({
+  productId,
+  name,
+  priceCents,
+  image,
+  selectedVariant,
+}: AddToCartButtonProps) {
   const addItem = useCartStore((s) => s.addItem)
 
-  const handle = () => {
+  function handle() {
     addItem({
-      productId: product.id,
-      name: product.name,
-      price_cents: product.price_cents,
+      productId,
+      name,
+      price_cents: priceCents,
       quantity: 1,
-      image: product.image || undefined,
+      sku: selectedVariant?.sku ?? undefined,
+      image,
     })
   }
 
   return (
-    <button onClick={handle} className="px-4 py-2 bg-black text-white rounded">
-      Add to cart
+    <button
+      onClick={handle}
+      className="w-full rounded-lg bg-navy px-6 py-3 font-sans text-base font-medium text-cream transition-colors hover:bg-forest focus:outline-none focus:ring-2 focus:ring-forest focus:ring-offset-2"
+    >
+      Add to Cart
     </button>
   )
 }

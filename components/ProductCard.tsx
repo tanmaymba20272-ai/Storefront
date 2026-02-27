@@ -1,30 +1,55 @@
 import React from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import Badge from './ui/Badge'
+import type { ProductListItem } from '../lib/actions/catalog'
 
-type Product = {
-  id: string
-  name: string
-  slug: string
-  price_cents: number
-  image?: string
-  drop_active?: boolean
+interface ProductCardProps {
+  product: ProductListItem
 }
 
-export default function ProductCard({ product }: { product: Product }) {
+function formatPrice(cents: number, currency: string): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: 0,
+  }).format(cents / 100)
+}
+
+export default function ProductCard({ product }: ProductCardProps) {
+  const image = product.metadata.images[0] ?? null
+  const isActiveDrop = product.drop !== null && product.drop.status === 'active'
+
   return (
-    <article className="border rounded overflow-hidden">
-      <Link href={`/products/${product.slug}`} className="block">
-        <div className="h-48 bg-gray-100 flex items-center justify-center">
-          {product.image ? <img src={product.image} alt={product.name} className="object-cover h-full w-full" /> : <div className="text-gray-500">No image</div>}
-        </div>
+    <article className="group relative flex flex-col overflow-hidden rounded-lg border border-stone/20 bg-ivory transition-transform duration-300 hover:scale-[1.02] hover:shadow-lg">
+      <Link href={`/shop/${product.slug}`} className="relative block aspect-[4/5] overflow-hidden bg-cream">
+        {image ? (
+          <Image
+            src={image}
+            alt={product.name}
+            fill
+            sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
+            className="object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-stone text-sm">
+            No image
+          </div>
+        )}
+        {isActiveDrop && (
+          <span className="absolute left-2 top-2">
+            <Badge className="bg-gold/90 text-navy font-semibold">Drop</Badge>
+          </span>
+        )}
       </Link>
-      <div className="p-3 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-medium">{product.name}</h3>
-          <div className="text-sm text-gray-600">${(product.price_cents / 100).toFixed(2)}</div>
-        </div>
-        {product.drop_active ? <Badge>Drop</Badge> : null}
+
+      <div className="flex flex-col gap-1 p-3">
+        <h3 className="font-serif text-sm text-navy leading-snug line-clamp-2">
+          {product.name}
+        </h3>
+        <p className="font-sans text-sm font-medium text-gold">
+          {formatPrice(product.price_cents, product.currency)}
+        </p>
       </div>
     </article>
   )

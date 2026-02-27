@@ -87,3 +87,66 @@ Next steps
 
 - Wire server-side endpoints for admin-only operations with Supabase service role keys.
 - Add deeper tests with a mocked Supabase client and run test suite in CI.
+
+---
+
+## Sprint 3 — "Old Money" Storefront
+
+### Design System (`tailwind.config.ts`)
+
+The config was converted to TypeScript and extended with the **Old Money** palette and premium typography:
+
+| Token      | Hex       | Usage                                        |
+|------------|-----------|----------------------------------------------|
+| `cream`    | `#F5F0E8` | Page backgrounds, card fills                 |
+| `navy`     | `#1B2A4A` | Primary text, deep headers, CTA buttons      |
+| `forest`   | `#2D4A3E` | Accent buttons, hover states                 |
+| `gold`     | `#C9A84C` | Highlights, badges, price labels             |
+| `charcoal` | `#2C2C2C` | Body copy                                    |
+| `stone`    | `#8A8278` | Muted text, placeholders, borders            |
+| `ivory`    | `#FAF7F2` | Elevated cards, dropdowns                    |
+
+Font families:
+- `font-serif` → `'Playfair Display'`, Georgia, serif
+- `font-sans` → `'Inter'`, system-ui, sans-serif
+
+Both fonts are imported in `app/globals.css` via Google Fonts (`@import url(...)`).
+
+### New Routes
+
+| Route           | File                                              | Type   |
+|-----------------|---------------------------------------------------|--------|
+| `/shop`         | `app/(storefront)/shop/page.tsx`                  | Server |
+| `/shop/[slug]`  | `app/(storefront)/shop/[slug]/page.tsx`           | Server |
+
+Both routes include dedicated `loading.tsx` files with skeleton states.
+
+### `framer-motion` & `next/image`
+
+- **`framer-motion`** is a required runtime dependency — used in `ProductImageGallery` for `AnimatePresence` fade/slide transitions and mobile swipe (`drag="x"`).
+- **`next/image`** is used for all product images with `fill` + positioned parent, explicit `sizes`, and `priority` on the main gallery image. No bare `<img>` tags for product imagery.
+
+Install command:
+
+```bash
+npm install framer-motion
+```
+
+### New Components
+
+| Component | Type | Description |
+|---|---|---|
+| `components/ui/Skeleton` | Shared | `animate-pulse` skeleton primitive |
+| `components/shop/CategoryFilter` | **Client** | Category filter pill bar (URL params) |
+| `components/shop/SortDropdown` | **Client** | Sort select (URL params) |
+| `components/shop/ProductGrid` | Server | Responsive 2/3/4-col product grid |
+| `components/shop/ShopGridSkeleton` | Server | 8-card loading skeleton |
+| `components/ProductCard` | Server | Product card — serif name, gold price, drop badge |
+| `components/ProductImageGallery` | **Client** | Framer Motion gallery with swipe |
+| `components/products/VariantSelector` | **Client** | Size/colour variant buttons |
+| `components/products/AddToCartButton` | **Client** | Typed cart action (no `any`) |
+| `components/products/VariantAndCart` | **Client** | Shared state island for variant + cart |
+
+### Testing
+
+Render stubs: `tests/shop.test.tsx`. Deeper tests (snapshot, image, hover) marked TODO.

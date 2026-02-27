@@ -66,3 +66,27 @@ Storage notes
 - The guidance migration contains example RLS policies for `storage.objects` to restrict
 	inserts/deletes to admin profiles and allow public reads for specific buckets.
 
+Running the Server Actions locally
+---------------------------------
+
+To exercise the server-side catalog actions locally:
+
+1. Set environment variables in your shell (do NOT commit these):
+
+```bash
+export SUPABASE_URL="https://your-project.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="<your-service-role-key>"
+export DEFAULT_PRODUCT_IMAGE="https://example.com/placeholder.png" # optional
+export SUPABASE_STORAGE_BUCKET="product-images" # optional
+```
+
+2. Use a short Node script to import and call the functions (example):
+
+```bash
+node -e "(async()=>{const c=require('./lib/actions/catalog');console.log(await c.getCategories());console.log(await c.getPublishedProducts({limit:2}));})()"
+```
+
+Notes:
+- The actions use the Supabase service role key; ensure this key is only used server-side.
+- Images returned by the actions are signed URLs (15-minute expiry) and are safe to render on the client.
+

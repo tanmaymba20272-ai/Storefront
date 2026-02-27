@@ -131,6 +131,33 @@ AS $$
 $$;
 */
 
+## Public Catalog API
+
+This section documents the server-side Server Actions implemented at `lib/actions/catalog.ts`.
+
+- `getCategories(): Promise<CategoryListItem[]>`
+  - Returns categories with fields: `id: string`, `name: string`, `slug: string`.
+
+- `getPublishedProducts(opts?: { categorySlug?: string; sort?: 'price_asc'|'price_desc'|'newest'; limit?: number; offset?: number; query?: string }): Promise<ProductListItem[]>`
+  - Returns products where `status = 'published'`.
+  - Each item includes: `id, name, slug, price_cents, currency, metadata -> images (signed URLs), category: {id,name,slug}, drop: {id,name,start_at,end_at,status}`.
+  - Supports server-side pagination (`limit`/`offset`), optional category filtering, optional sorting, and optional full-text `query` (uses `to_tsvector` when available).
+
+- `getActiveAndUpcomingDrops(): Promise<DropListItem[]>`
+  - Returns drops where `end_at > now()` OR `start_at > now()`, ordered by `start_at`.
+  - Each item: `id, name, start_at, end_at, status`.
+
+- `getProductBySlug(slug: string): Promise<ProductDetail | null>`
+  - Returns full product detail for the given slug. Includes `inventory_count` (server-only), parsed `metadata` with `variants` and `images` (signed URLs), and related `category` and `drop` objects.
+
+Note: These Server Actions never return admin-only fields (e.g., `cost_price`). Image storage keys are signed server-side and the public responses include short-lived signed URLs (15 minutes).
+
+Security & Performance Notes:
+- All filtering, pagination and searching is executed server-side and selects only necessary columns (avoid `SELECT *`).
+- When `query` is provided, the actions prefer Postgres full-text search (`to_tsvector`) to leverage DB indexes. Otherwise they use indexed filters (e.g., category id) for performance.
+- These endpoints are good candidates for short TTL edge caching (e.g., 60s) to reduce DB load during high-traffic drops.
+
+
 /* 3) Server Action / TypeScript shapes (callable from Next.js Server Actions)
  *    - These actions should be implemented server-side and use the
  *      Supabase service role key. Examples below describe the TypeScript
