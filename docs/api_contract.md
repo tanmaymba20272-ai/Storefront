@@ -140,6 +140,33 @@ Notes:
   - RLS expectations: `store_settings` is admin-only (read/write). Server-side operations should use the service role.
 */
 
+## Webhooks
+
+This application accepts Razorpay webhooks at `/api/webhooks/razorpay` and follows an idempotent processing contract.
+
+- **Signature verification**: The route reads the raw request body (`await request.text()`), computes the HMAC using the server-side `RAZORPAY_WEBHOOK_SECRET` and compares it to the `x-razorpay-signature` header using `crypto.timingSafeEqual`. If verification fails, the endpoint returns `400` and makes no DB changes.
+
+- **Event types handled**:
+  - `order.paid` — payload path: `payload.order.entity.id` (this is the Razorpay order id). Handler will resolve `orders` by `razorpay_order_id`, call `public.finalize_inventory(order_uuid)`, then update `orders.status = 'paid'` and `paid_at = now()`.
+  - `payment.captured` — payload path: `payload.payment.entity.order_id`. Treated the same as `order.paid`.
+  - `payment.failed` — payload path: `payload.payment.entity.order_id`. Handler will call `public.fail_order(order_uuid)` and return `200`.
+
+- **Idempotency contract**:
+  - The webhook handler first looks up the row in `public.orders` by `razorpay_order_id` and checks `status`.
+  - If `orders.status = 'paid'` the handler will not call `finalize_inventory` again and will return `200` (acknowledgement). This guarantees duplicate `order.paid` / `payment.captured` events do not double-decrement inventory.
+  - `payment.failed` events result in `public.fail_order(order_uuid)` which itself calls `release_reservation(order_uuid)` and marks the order `failed`.
+
+- **Payload paths summary**:
+  - `order.paid` → `payload.order.entity.id` → maps to `orders.razorpay_order_id`
+  - `payment.captured` → `payload.payment.entity.order_id` → maps to `orders.razorpay_order_id`
+  - `payment.failed` → `payload.payment.entity.order_id` → maps to `orders.razorpay_order_id`
+
+- **Operational notes**:
+  - All DB calls are performed server-side with the Supabase service-role client; webhooks never expose secrets to clients.
+  - The DB RPCs `finalize_inventory` and `fail_order` are created `SECURITY DEFINER` and should be owned by the service-role DB user.
+  - If the webhook receives an event with an unknown `razorpay_order_id` the handler will acknowledge with `200` to avoid repeated delivery by Razorpay; investigate missing orders separately.
+
+
 export type UUID = string;
 export type Timestamptz = string; // ISO 8601
 
@@ -233,6 +260,11 @@ export interface ApiContract {
  * 1) Profiles auto-creation trigger
  *    - When a new row is inserted into `auth.users`, the DB trigger
  *      `public.create_profile_after_auth_user()` will ensure a matching
+
+## Success page note
+
+- The storefront success page (`/checkout/success?order_id=<order_id>`) performs a server-side lookup against the `orders` table (via the server factory `getServerSupabase()`) to read order details by `id` (the implementation consumes `GET /orders?id=<order_id>` semantics server-side). The client-side cart is cleared only after the customer lands on this page — the clearing is performed by a client component that runs on mount.
+
  *      `public.profiles` row exists with `role = 'customer'` by default.
  *    - Server integrators: no extra server calls are required to create
  *      profiles; the trigger runs inside Postgres. If you rely on profile
